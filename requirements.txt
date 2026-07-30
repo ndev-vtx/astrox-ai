@@ -3,3 +3,4 @@ groq
 python-dotenv
 Pillow
 extra-streamlit-components
+duckduckgo-search
