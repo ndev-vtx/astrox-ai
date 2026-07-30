@@ -9,6 +9,7 @@ from dotenv import load_dotenv
 from io import BytesIO
 from PIL import Image
 import extra_streamlit_components as stx
+from duckduckgo_search import DDGS
 
 # --- CẤU HÌNH & TẢI BIẾN MÔI TRƯỜNG ---
 load_dotenv()
@@ -102,6 +103,17 @@ def save_db(data, file_name):
             json.dump(data, f, ensure_ascii=False, indent=4)
     except Exception as e:
         st.error(f"Lỗi khi lưu dữ liệu: {e}")
+
+# --- HÀM TÌM KIẾM WEB ---
+def search_web(query, max_results=4):
+    try:
+        results = []
+        with DDGS() as ddgs:
+            for r in ddgs.text(query, max_results=max_results):
+                results.append(f"Tiêu đề: {r.get('title')}\nTrích dẫn: {r.get('body')}\nLink: {r.get('href')}")
+        return "\n\n".join(results)
+    except Exception as e:
+        return f"Không thể tìm kiếm web: {e}"
 
 # --- XỬ LÝ ẢNH CHUYỂN ĐỔI ---
 def image_to_base64(image):
@@ -221,7 +233,6 @@ if not st.session_state.logged_in:
                     st.session_state.username = login_user
                     st.session_state.current_chat_id = None
                     st.session_state.messages = []
-                    # Lưu Cookie
                     cookie_manager.set('astrox_logged_user', login_user, expires_at=None, key="set_cookie_login")
                     st.rerun()
                 else:
@@ -241,7 +252,6 @@ if not st.session_state.logged_in:
                     st.session_state.username = reg_user
                     st.session_state.current_chat_id = None
                     st.session_state.messages = []
-                    # Lưu Cookie
                     cookie_manager.set('astrox_logged_user', reg_user, expires_at=None, key="set_cookie_reg")
                     st.rerun()
                 else:
@@ -249,7 +259,7 @@ if not st.session_state.logged_in:
 
 # --- GIAO DIỆN CHÍNH KHI ĐÃ ĐĂNG NHẬP ---
 else:
-    # HỘP THOẠI XÁC NHẬN XÓA (POPUP DIALOG CHUẨN)
+    # HỘP THOẠI XÁC NHẬN XÓA
     @st.dialog("⚠️ Xác nhận xóa cuộc trò chuyện")
     def confirm_delete_dialog(chat_id_to_del):
         st.write("Bạn có chắc chắn muốn xóa cuộc trò chuyện này không? Hành động này không thể hoàn tác.")
@@ -285,6 +295,10 @@ else:
             st.rerun()
 
         st.markdown("<br>", unsafe_allow_html=True)
+        
+        # Bật/tắt Tìm kiếm Web
+        enable_web_search = st.toggle("🌐 Tìm kiếm Web thực tế", value=False, help="Cho phép Astrox AI tra cứu dữ liệu mới nhất trên internet.")
+
         search_kw = st.text_input("🔍 Tìm kiếm...", key="search_chat_kw", label_visibility="collapsed", placeholder="🔍 Tìm kiếm lịch sử...")
 
         st.caption("LỊCH SỬ TRÒ CHUYỆN")
@@ -321,7 +335,7 @@ else:
 
         st.divider()
 
-        # Phần Thông tin User ở góc dưới Sidebar
+        # Thông tin User ở cuối Sidebar
         users = load_db(DB_FILE)
         current_user_data = users.get(st.session_state.username, {}) if isinstance(users, dict) else {}
         user_avatar_base64 = current_user_data.get("avatar_base64", "")
@@ -348,7 +362,6 @@ else:
                 st.session_state.current_chat_id = None
                 st.session_state.messages = []
                 st.session_state.show_account_page = False
-                # Xóa Cookie khi Đăng xuất
                 cookie_manager.delete('astrox_logged_user', key="del_cookie_logout")
                 st.rerun()
 
@@ -383,7 +396,6 @@ else:
             st.markdown("### Hôm nay **Astrox AI** có thể giúp gì cho bạn?")
             st.write("<br>", unsafe_allow_html=True)
 
-            # Các gợi ý mẫu kiểu Gemini
             col_g1, col_g2, col_g3 = st.columns(3)
             prompt_preset = None
 
@@ -410,15 +422,15 @@ else:
             with col_g3:
                 st.markdown("""
                 <div class="suggestion-card">
-                    <b>🚀 Tìm hiểu Công nghệ</b><br>
-                    <span style="color:#57606a; font-size: 14px;">Giải thích mô hình Asteroid 1.24 và AI</span>
+                    <b>🌐 Tìm kiếm thông tin</b><br>
+                    <span style="color:#57606a; font-size: 14px;">Tin tức mới nhất về công nghệ và AI hiện nay</span>
                 </div>
                 """, unsafe_allow_html=True)
                 if st.button("Thử gợi ý này", key="p3", use_container_width=True):
-                    prompt_preset = "Hãy giới thiệu về Astrox AI và mô hình Asteroid 1.24."
+                    prompt_preset = "Cập nhật các tin tức công nghệ nổi bật nhất tuần này."
 
         else:
-            # Hiển thị các tin nhắn đã trò chuyện
+            # Hiển thị lịch sử chat
             for message in st.session_state.messages:
                 with st.chat_message(message["role"]):
                     st.markdown(message["content"])
@@ -446,6 +458,14 @@ else:
                     st.markdown(prompt)
 
                 with st.chat_message("assistant"):
+                    search_context = ""
+                    if enable_web_search:
+                        with st.status("🔍 Đang tìm kiếm thông tin trên Web...", expanded=False):
+                            search_results = search_web(prompt)
+                            if search_results:
+                                search_context = f"\n\n[Dữ liệu tìm kiếm thời gian thực từ Web]:\n{search_results}\n\nHãy tổng hợp thông tin từ dữ liệu web trên để trả lời câu hỏi của người dùng một cách chính xác nhất."
+                                st.write("Đã tìm thấy dữ liệu liên quan!")
+
                     system_instruction = (
                         "Bạn tên là Astrox AI, sử dụng mô hình Asteroid 1.24. "
                         "Người sáng tạo ra bạn là Nguyễn Khôi Nguyên. "
@@ -453,13 +473,20 @@ else:
                         "Tuyệt đối không tự nhận là do Meta, OpenAI hay Groq tạo ra."
                     )
 
+                    # Chuẩn bị lịch sử trò chuyện gửi lên AI
+                    messages_to_send = [{"role": "system", "content": system_instruction}]
+                    
+                    for msg in st.session_state.messages[:-1]:
+                        messages_to_send.append(msg)
+                    
+                    # Thêm ngữ cảnh tìm kiếm web vào tin nhắn mới nhất
+                    latest_user_content = prompt + search_context
+                    messages_to_send.append({"role": "user", "content": latest_user_content})
+
                     try:
                         completion = client.chat.completions.create(
                             model="llama-3.3-70b-versatile",
-                            messages=[
-                                {"role": "system", "content": system_instruction},
-                                *st.session_state.messages
-                            ]
+                            messages=messages_to_send
                         )
                         response = completion.choices[0].message.content
                     except Exception as e:
