@@ -5,15 +5,15 @@ import streamlit as st
 from groq import Groq
 from dotenv import load_dotenv
 
-# 1. Tải biến môi trường
+
 load_dotenv()
 
-# Ưu tiên lấy Key từ Streamlit Secrets (trên Web), nếu không có thì lấy từ .env (trên máy local)
-GROQ_API_KEY = st.secrets.get("GROQ_API_KEY", os.getenv("GROQ_API_KEY"))
+
+ASTROX_API_KEY = st.secrets.get("ASTROX_API_KEY", os.getenv("ASTROX_API_KEY"))
 
 st.set_page_config(page_title="Astrox AI", page_icon="🚀", layout="centered")
 
-# --- QUẢN LÝ DATABASE TRÊN STREAMLIT ---
+
 DB_FILE = "users_db.json"
 
 def load_users():
@@ -46,7 +46,7 @@ def authenticate_user(username, password):
         return True
     return False
 
-# --- QUẢN LÝ TRẠNG THÁI PHIÊN LÀM VIỆC ---
+
 if "logged_in" not in st.session_state:
     st.session_state.logged_in = False
 if "username" not in st.session_state:
@@ -54,9 +54,10 @@ if "username" not in st.session_state:
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
-# --- GIAO DIỆN ĐĂNG NHẬP / ĐĂNG KÝ ---
+
 if not st.session_state.logged_in:
     st.title("🚀 Astrox AI System")
+    st.caption("Astrox AI — Into the New Era")
     
     tab_login, tab_register = st.tabs(["Đăng nhập", "Đăng ký tài khoản"])
 
@@ -91,7 +92,7 @@ if not st.session_state.logged_in:
                 else:
                     st.error("Tên đăng nhập này đã có người sử dụng!")
 
-# --- GIAO DIỆN CHAT AI (KHI ĐÃ ĐĂNG NHẬP) ---
+
 else:
     # Thanh bên (Sidebar)
     with st.sidebar:
@@ -111,11 +112,12 @@ else:
             st.rerun()
 
     st.title("🚀 Trợ lý Astrox AI")
+    st.caption("Astrox AI — Into the New Era")
     
-    if not GROQ_API_KEY:
-        st.error("Chưa cấu hình GROQ_API_KEY!")
+    if not ASTROX_API_KEY:
+        st.error("Chưa cấu hình ASTROX_API_KEY! Vui lòng thêm key vào File .env hoặc Streamlit Secrets.")
     else:
-        client = Groq(api_key=GROQ_API_KEY)
+        client = Groq(api_key=ASTROX_API_KEY)
 
         # Hiển thị lịch sử chat
         for message in st.session_state.messages:
