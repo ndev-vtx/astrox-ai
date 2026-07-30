@@ -23,12 +23,8 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Quản lý Cookie tự động đăng nhập
-@st.cache_resource
-def get_cookie_manager():
-    return stx.CookieManager()
-
-cookie_manager = get_cookie_manager()
+# Quản lý Cookie (Khởi tạo trực tiếp, không dùng @st.cache_resource)
+cookie_manager = stx.CookieManager()
 
 # --- CSS TÙY CHỈNH THEO PHONG CÁCH GEMINI / DEEPSEEK ---
 st.markdown("""
