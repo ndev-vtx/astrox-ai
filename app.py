@@ -268,7 +268,7 @@ else:
         st.write("Bạn có chắc chắn muốn xóa cuộc trò chuyện này không? Hành động này không thể hoàn tác.")
         c_yes, c_no = st.columns([1, 1])
         with c_yes:
-            if st.button("Xóa vĩnh viễn", type="primary", use_container_width=True):
+            if st.button("Xóa", type="primary", use_container_width=True):
                 delete_user_chat_session(st.session_state.username, chat_id_to_del)
                 if st.session_state.current_chat_id == chat_id_to_del:
                     st.session_state.current_chat_id = None
@@ -305,8 +305,8 @@ else:
             options=[
                 "🚀 Asteroid Fast", 
                 "🧠 Asteroid Thông minh",
-                "⚡ Artisfic 2.0 (Gemini)",
-                "✨ Artisfic 3.0 (Gemini)"
+                "⚡ Artisfic 2.0 ",
+                "✨ Artisfic 3.0 "
             ],
             index=0,
             help="Asteroid Fast & Artisfic phản hồi siêu nhanh. Asteroid Thông minh tư duy sâu hơn."
@@ -489,7 +489,7 @@ else:
                 # 1. XỬ LÝ CÁC MODEL ARTISFIC (CHẠY BẰNG ARTICFIC_API_KEY)
                 if "Artisfic" in model_choice:
                     if not ARTICFIC_API_KEY:
-                        response = "⚠️ Chưa cấu hình `ARTICFIC_API_KEY` trong Secrets!"
+                        response = "⚠️ Chưa có API_KEY, contact 0966947956 for help"
                     else:
                         try:
                             gemini_client = genai.Client(api_key=ARTICFIC_API_KEY)
