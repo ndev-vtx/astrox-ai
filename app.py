@@ -16,6 +16,7 @@ LOGO_FILE = "astrox_logo.png"
 
 st.set_page_config(page_title="Astrox AI", page_icon=LOGO_FILE if os.path.exists(LOGO_FILE) else "🤖", layout="wide")
 
+# --- QUẢN LÝ DATABASE TRÊN MÁY / CLOUD ---
 DB_FILE = "users_db.json"
 CHATS_FILE = "chats_db.json"
 
@@ -24,13 +25,17 @@ def load_db(file_name):
         return {}
     try:
         with open(file_name, "r", encoding="utf-8") as f:
-            return json.load(f)
+            data = json.load(f)
+            return data if isinstance(data, dict) else {}
     except Exception:
         return {}
 
 def save_db(data, file_name):
-    with open(file_name, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=4)
+    try:
+        with open(file_name, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=4)
+    except Exception as e:
+        st.error(f"Lỗi khi lưu dữ liệu: {e}")
 
 def image_to_base64(image):
     buffered = BytesIO()
@@ -62,7 +67,7 @@ def register_user(username, password):
 
 def authenticate_user(username, password):
     users = load_db(DB_FILE)
-    if username in users and users[username]["password"] == hash_password(password):
+    if username in users and users[username].get("password") == hash_password(password):
         return True
     return False
 
@@ -74,14 +79,18 @@ def update_user_avatar(username, avatar_base64):
         return True
     return False
 
-
 def get_user_all_chats(username):
     chats = load_db(CHATS_FILE)
-    return chats.get(username, {})
+    if not isinstance(chats, dict):
+        return {}
+    user_data = chats.get(username, {})
+    return user_data if isinstance(user_data, dict) else {}
 
 def save_user_chat_session(username, chat_id, title, messages):
     chats = load_db(CHATS_FILE)
-    if username not in chats:
+    if not isinstance(chats, dict):
+        chats = {}
+    if username not in chats or not isinstance(chats[username], dict):
         chats[username] = {}
     chats[username][chat_id] = {
         "title": title,
@@ -91,9 +100,10 @@ def save_user_chat_session(username, chat_id, title, messages):
 
 def delete_user_chat_session(username, chat_id):
     chats = load_db(CHATS_FILE)
-    if username in chats and chat_id in chats[username]:
-        del chats[username][chat_id]
-        save_db(chats, CHATS_FILE)
+    if isinstance(chats, dict) and username in chats and isinstance(chats[username], dict):
+        if chat_id in chats[username]:
+            del chats[username][chat_id]
+            save_db(chats, CHATS_FILE)
 
 if "logged_in" not in st.session_state:
     st.session_state.logged_in = False
@@ -105,10 +115,7 @@ if "messages" not in st.session_state:
     st.session_state.messages = []
 if "show_account_page" not in st.session_state:
     st.session_state.show_account_page = False
-if "auth_error" not in st.session_state:
-    st.session_state.auth_error = ""
 
-# --- GIAO DIỆN CHÍNH (HEADER) ---
 cols_head = st.columns([1, 4])
 with cols_head[0]:
     if os.path.exists(LOGO_FILE):
@@ -117,7 +124,6 @@ with cols_head[1]:
     st.title("Astrox AI")
     st.caption("Intelligence & Innovation — Into the Infinite Era")
 
-# --- TRANG DĂNG NHẬP / ĐĂNG KÝ ---
 if not st.session_state.logged_in:
     tab_login, tab_register = st.tabs(["Đăng nhập", "Đăng ký"])
 
@@ -134,7 +140,6 @@ if not st.session_state.logged_in:
                 st.session_state.username = login_user
                 st.session_state.current_chat_id = None
                 st.session_state.messages = []
-                st.session_state.auth_error = ""
                 st.success("Đăng nhập thành công!")
                 st.rerun()
             else:
@@ -153,12 +158,10 @@ if not st.session_state.logged_in:
                 st.error("Mật khẩu xác nhận không khớp!")
             else:
                 if register_user(reg_user, reg_pass):
-
                     st.session_state.logged_in = True
                     st.session_state.username = reg_user
                     st.session_state.current_chat_id = None
                     st.session_state.messages = []
-                    st.session_state.auth_error = ""
                     st.success("Tạo tài khoản thành công! Đang tiến vào Astrox AI...")
                     st.rerun()
                 else:
@@ -168,10 +171,9 @@ else:
 
     with st.sidebar:
         users = load_db(DB_FILE)
-        current_user_data = users.get(st.session_state.username, {})
+        current_user_data = users.get(st.session_state.username, {}) if isinstance(users, dict) else {}
         user_avatar_base64 = current_user_data.get("avatar_base64", "")
         
-        # Thông tin User & Avatar
         col_av, col_name = st.columns([1, 2])
         with col_av:
             avatar_img = base64_to_image(user_avatar_base64)
@@ -200,23 +202,22 @@ else:
         user_chats = get_user_all_chats(st.session_state.username)
 
         filtered_chats = {}
-        for c_id, c_data in user_chats.items():
-            title = c_data.get("title", "Trò chuyện mới")
-            if not search_kw or search_kw.lower() in title.lower():
-                filtered_chats[c_id] = c_data
+        if isinstance(user_chats, dict):
+            for c_id, c_data in user_chats.items():
+                if isinstance(c_data, dict):
+                    title = c_data.get("title", "Trò chuyện mới")
+                    if not search_kw or search_kw.lower() in title.lower():
+                        filtered_chats[c_id] = c_data
 
         if not filtered_chats:
             st.caption("Chưa có lịch sử hoặc không tìm thấy.")
         else:
-            # Hiển thị danh sách các mục Chat
             for c_id, c_data in reversed(list(filtered_chats.items())):
                 title = c_data.get("title", "Trò chuyện mới")
- 
                 display_title = title[:22] + "..." if len(title) > 22 else title
                 
                 col_c1, col_c2 = st.columns([4, 1])
                 with col_c1:
-            
                     is_current = (c_id == st.session_state.current_chat_id)
                     btn_label = f"💬 {display_title}" if not is_current else f"👉 {display_title}"
                     if st.button(btn_label, key=f"chat_{c_id}", use_container_width=True):
@@ -225,7 +226,6 @@ else:
                         st.session_state.show_account_page = False
                         st.rerun()
                 with col_c2:
-
                     if st.button("🗑️", key=f"del_{c_id}"):
                         delete_user_chat_session(st.session_state.username, c_id)
                         if st.session_state.current_chat_id == c_id:
@@ -243,7 +243,6 @@ else:
             st.session_state.show_account_page = False
             st.rerun()
 
-    # Trang quản lý tài khoản
     if st.session_state.show_account_page:
         st.header(f"Cài đặt tài khoản: {st.session_state.username}")
         st.write("---")
@@ -275,27 +274,22 @@ else:
         else:
             client = Groq(api_key=ASTROX_API_KEY)
 
-            # Hiển thị các tin nhắn của hội thoại hiện tại
             for message in st.session_state.messages:
                 with st.chat_message(message["role"]):
                     st.markdown(message["content"])
 
             if prompt := st.chat_input("Hỏi Astrox AI bất kỳ điều gì..."):
-
                 if st.session_state.current_chat_id is None:
                     st.session_state.current_chat_id = str(uuid.uuid4())
                     chat_title = prompt[:30] if len(prompt) > 30 else prompt
                 else:
-                    # Lấy lại tiêu đề cũ
                     current_chats = get_user_all_chats(st.session_state.username)
                     chat_title = current_chats.get(st.session_state.current_chat_id, {}).get("title", prompt[:30])
 
-                # Thêm câu hỏi người dùng
                 st.session_state.messages.append({"role": "user", "content": prompt})
                 with st.chat_message("user"):
                     st.markdown(prompt)
 
-                # AI trả lời
                 with st.chat_message("assistant"):
                     system_instruction = (
                         "Bạn tên là Astrox AI, sử dụng mô hình Asteroid 1.24. "
@@ -320,7 +314,6 @@ else:
 
                 st.session_state.messages.append({"role": "assistant", "content": response})
 
-                # Tự động lưu mục Chat vào database
                 save_user_chat_session(
                     st.session_state.username,
                     st.session_state.current_chat_id,
