@@ -5,6 +5,7 @@ import base64
 import uuid
 import streamlit as st
 from groq import Groq
+from google import genai
 from dotenv import load_dotenv
 from io import BytesIO
 from PIL import Image
@@ -13,7 +14,9 @@ from duckduckgo_search import DDGS
 
 # --- CẤU HÌNH & TẢI BIẾN MÔI TRƯỜNG ---
 load_dotenv()
+# Đọc API Key từ Secrets hoặc môi trường
 ASTROX_API_KEY = st.secrets.get("ASTROX_API_KEY", os.getenv("ASTROX_API_KEY"))
+ARTICFIC_API_KEY = st.secrets.get("ARTICFIC_API_KEY", os.getenv("ARTICFIC_API_KEY"))
 
 LOGO_FILE = "astrox_logo.png"
 
@@ -285,7 +288,7 @@ else:
         if os.path.exists(LOGO_FILE):
             st.image(LOGO_FILE, width=50)
         st.markdown("### **Astrox AI**")
-        st.caption("Asteroid 1.24")
+        st.caption("Astrox Engine")
 
         # Nút tạo đoạn chat mới
         if st.button("➕ Cuộc trò chuyện mới", use_container_width=True, type="primary"):
@@ -296,6 +299,19 @@ else:
 
         st.markdown("<br>", unsafe_allow_html=True)
         
+        # LỰA CHỌN MÔ HÌNH AI
+        model_choice = st.selectbox(
+            "⚡ Chọn mô hình AI:",
+            options=[
+                "🚀 Asteroid Fast", 
+                "🧠 Asteroid Thông minh",
+                "⚡ Artisfic 2.0 (Gemini)",
+                "✨ Artisfic 3.0 (Gemini)"
+            ],
+            index=0,
+            help="Asteroid Fast & Artisfic phản hồi siêu nhanh. Asteroid Thông minh tư duy sâu hơn."
+        )
+
         # Bật/tắt Tìm kiếm Web
         enable_web_search = st.toggle("🌐 Tìm kiếm Web thực tế", value=False, help="Cho phép Astrox AI tra cứu dữ liệu mới nhất trên internet.")
 
@@ -440,66 +456,92 @@ else:
         prompt = prompt_input or (prompt_preset if 'prompt_preset' in locals() else None)
 
         if prompt:
-            if not ASTROX_API_KEY:
-                st.error("Chưa cấu hình API Key cho Astrox AI!")
+            if st.session_state.current_chat_id is None:
+                st.session_state.current_chat_id = str(uuid.uuid4())
+                chat_title = prompt[:30] if len(prompt) > 30 else prompt
             else:
-                client = Groq(api_key=ASTROX_API_KEY)
+                current_chats = get_user_all_chats(st.session_state.username)
+                chat_title = current_chats.get(st.session_state.current_chat_id, {}).get("title", prompt[:30])
 
-                if st.session_state.current_chat_id is None:
-                    st.session_state.current_chat_id = str(uuid.uuid4())
-                    chat_title = prompt[:30] if len(prompt) > 30 else prompt
-                else:
-                    current_chats = get_user_all_chats(st.session_state.username)
-                    chat_title = current_chats.get(st.session_state.current_chat_id, {}).get("title", prompt[:30])
+            st.session_state.messages.append({"role": "user", "content": prompt})
 
-                st.session_state.messages.append({"role": "user", "content": prompt})
+            with st.chat_message("user"):
+                st.markdown(prompt)
 
-                with st.chat_message("user"):
-                    st.markdown(prompt)
+            with st.chat_message("assistant"):
+                search_context = ""
+                if enable_web_search:
+                    with st.status("🔍 Đang tìm kiếm thông tin trên Web...", expanded=False):
+                        search_results = search_web(prompt)
+                        if search_results:
+                            search_context = f"\n\n[Dữ liệu tìm kiếm thời gian thực từ Web]:\n{search_results}\n\nHãy tổng hợp thông tin từ dữ liệu web trên để trả lời câu hỏi của người dùng một cách chính xác nhất."
+                            st.write("Đã tìm thấy dữ liệu liên quan!")
 
-                with st.chat_message("assistant"):
-                    search_context = ""
-                    if enable_web_search:
-                        with st.status("🔍 Đang tìm kiếm thông tin trên Web...", expanded=False):
-                            search_results = search_web(prompt)
-                            if search_results:
-                                search_context = f"\n\n[Dữ liệu tìm kiếm thời gian thực từ Web]:\n{search_results}\n\nHãy tổng hợp thông tin từ dữ liệu web trên để trả lời câu hỏi của người dùng một cách chính xác nhất."
-                                st.write("Đã tìm thấy dữ liệu liên quan!")
-
-                    system_instruction = (
-                        "Bạn tên là Astrox AI, sử dụng mô hình Asteroid 1.24. "
-                        "Người sáng tạo ra bạn là Nguyễn Khôi Nguyên. "
-                        "Khi được hỏi, hãy khẳng định bạn là Astrox AI (mô hình Asteroid 1.24) do Nguyễn Khôi Nguyên phát triển. "
-                        "Tuyệt đối không tự nhận là do Meta, OpenAI hay Groq tạo ra."
-                    )
-
-                    # Chuẩn bị lịch sử trò chuyện gửi lên AI
-                    messages_to_send = [{"role": "system", "content": system_instruction}]
-                    
-                    for msg in st.session_state.messages[:-1]:
-                        messages_to_send.append(msg)
-                    
-                    # Thêm ngữ cảnh tìm kiếm web vào tin nhắn mới nhất
-                    latest_user_content = prompt + search_context
-                    messages_to_send.append({"role": "user", "content": latest_user_content})
-
-                    try:
-                        completion = client.chat.completions.create(
-                            model="llama-3.3-70b-versatile",
-                            messages=messages_to_send
-                        )
-                        response = completion.choices[0].message.content
-                    except Exception as e:
-                        response = f"Lỗi kết nối AI: {e}"
-
-                    st.markdown(response)
-
-                st.session_state.messages.append({"role": "assistant", "content": response})
-
-                save_user_chat_session(
-                    st.session_state.username,
-                    st.session_state.current_chat_id,
-                    chat_title,
-                    st.session_state.messages
+                system_instruction = (
+                    "Bạn tên là Astrox AI. "
+                    "Người sáng tạo ra bạn là Nguyễn Khôi Nguyên. "
+                    "Khi được hỏi, hãy khẳng định bạn là Astrox AI do Nguyễn Khôi Nguyên phát triển. "
+                    "Tuyệt đối không tự nhận là do Meta, OpenAI hay Google tạo ra."
                 )
-                st.rerun()
+
+                response = ""
+
+                # 1. XỬ LÝ CÁC MODEL ARTISFIC (CHẠY BẰNG ARTICFIC_API_KEY)
+                if "Artisfic" in model_choice:
+                    if not ARTICFIC_API_KEY:
+                        response = "⚠️ Chưa cấu hình `ARTICFIC_API_KEY` trong Secrets!"
+                    else:
+                        try:
+                            gemini_client = genai.Client(api_key=ARTICFIC_API_KEY)
+                            
+                            conversation_text = f"System: {system_instruction}\n"
+                            for msg in st.session_state.messages[:-1]:
+                                conversation_text += f"{msg['role'].capitalize()}: {msg['content']}\n"
+                            
+                            conversation_text += f"User: {prompt} {search_context}"
+
+                            target_gemini_model = 'gemini-2.5-flash' if "2.0" in model_choice else 'gemini-2.5-flash'
+
+                            res = gemini_client.models.generate_content(
+                                model=target_gemini_model,
+                                contents=conversation_text
+                            )
+                            response = res.text
+                        except Exception as e:
+                            response = f"Lỗi Artisfic API: {e}"
+
+                # 2. XỬ LÝ CÁC MODEL ASTEROID (CHẠY BẰNG ASTROX_API_KEY)
+                else:
+                    if not ASTROX_API_KEY:
+                        response = "⚠️ Chưa cấu hình `ASTROX_API_KEY` trong Secrets!"
+                    else:
+                        client = Groq(api_key=ASTROX_API_KEY)
+                        selected_model = "llama-3.1-8b-instant" if "Fast" in model_choice else "llama-3.3-70b-versatile"
+
+                        messages_to_send = [{"role": "system", "content": system_instruction}]
+                        for msg in st.session_state.messages[:-1]:
+                            messages_to_send.append(msg)
+                        
+                        latest_user_content = prompt + search_context
+                        messages_to_send.append({"role": "user", "content": latest_user_content})
+
+                        try:
+                            completion = client.chat.completions.create(
+                                model=selected_model,
+                                messages=messages_to_send
+                            )
+                            response = completion.choices[0].message.content
+                        except Exception as e:
+                            response = f"Lỗi Asteroid API: {e}"
+
+                st.markdown(response)
+
+            st.session_state.messages.append({"role": "assistant", "content": response})
+
+            save_user_chat_session(
+                st.session_state.username,
+                st.session_state.current_chat_id,
+                chat_title,
+                st.session_state.messages
+            )
+            st.rerun()
