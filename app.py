@@ -8,13 +8,59 @@ from groq import Groq
 from dotenv import load_dotenv
 from io import BytesIO
 from PIL import Image
+import extra_streamlit_components as stx
 
+# --- CẤU HÌNH & TẢI BIẾN MÔI TRƯỜNG ---
 load_dotenv()
 ASTROX_API_KEY = st.secrets.get("ASTROX_API_KEY", os.getenv("ASTROX_API_KEY"))
 
 LOGO_FILE = "astrox_logo.png"
 
-st.set_page_config(page_title="Astrox AI", page_icon=LOGO_FILE if os.path.exists(LOGO_FILE) else "🤖", layout="wide")
+st.set_page_config(
+    page_title="Astrox AI",
+    page_icon=LOGO_FILE if os.path.exists(LOGO_FILE) else "✨",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
+
+# Quản lý Cookie tự động đăng nhập
+@st.cache_resource
+def get_cookie_manager():
+    return stx.CookieManager()
+
+cookie_manager = get_cookie_manager()
+
+# --- CSS TÙY CHỈNH THEO PHONG CÁCH GEMINI / DEEPSEEK ---
+st.markdown("""
+<style>
+    /* Nền chính tối giản */
+    .stApp {
+        background-color: #0e1117;
+        color: #e6e6e6;
+    }
+    
+    /* Tùy chỉnh Sidebar */
+    [data-testid="stSidebar"] {
+        background-color: #161b22;
+        border-right: 1px solid #30363d;
+    }
+
+    /* Thẻ gợi ý kiểu Gemini */
+    .suggestion-card {
+        background-color: #1f242d;
+        border: 1px solid #30363d;
+        border-radius: 12px;
+        padding: 16px;
+        margin-bottom: 12px;
+    }
+    
+    /* Tối ưu ô chat */
+    .stChatInputContainer {
+        border-radius: 24px !important;
+        border: 1px solid #30363d !important;
+    }
+</style>
+""", unsafe_allow_html=True)
 
 # --- QUẢN LÝ DATABASE TRÊN MÁY / CLOUD ---
 DB_FILE = "users_db.json"
@@ -37,6 +83,7 @@ def save_db(data, file_name):
     except Exception as e:
         st.error(f"Lỗi khi lưu dữ liệu: {e}")
 
+# --- XỬ LÝ ẢNH CHUYỂN ĐỔI ---
 def image_to_base64(image):
     buffered = BytesIO()
     image.save(buffered, format="PNG")
@@ -51,6 +98,7 @@ def base64_to_image(base64_str):
     except Exception:
         return None
 
+# --- CHỨC NĂNG TÀI KHOẢN ---
 def hash_password(password):
     return hashlib.sha256(str.encode(password)).hexdigest()
 
@@ -79,6 +127,7 @@ def update_user_avatar(username, avatar_base64):
         return True
     return False
 
+# --- CHỨC NĂNG QUẢN LÝ LỊCH SỬ CHAT ---
 def get_user_all_chats(username):
     chats = load_db(CHATS_FILE)
     if not isinstance(chats, dict):
@@ -105,6 +154,7 @@ def delete_user_chat_session(username, chat_id):
             del chats[username][chat_id]
             save_db(chats, CHATS_FILE)
 
+# --- KHỞI TẠO TRẠNG THÁI PHIÊN VÀ ĐỌC COOKIE ---
 if "logged_in" not in st.session_state:
     st.session_state.logged_in = False
 if "username" not in st.session_state:
@@ -115,90 +165,109 @@ if "messages" not in st.session_state:
     st.session_state.messages = []
 if "show_account_page" not in st.session_state:
     st.session_state.show_account_page = False
+if "chat_to_delete" not in st.session_state:
+    st.session_state.chat_to_delete = None
 
-cols_head = st.columns([1, 4])
-with cols_head[0]:
-    if os.path.exists(LOGO_FILE):
-        st.image(LOGO_FILE, width=110)
-with cols_head[1]:
-    st.title("Astrox AI")
-    st.caption("Intelligence & Innovation — Into the Infinite Era")
+# TỰ ĐỘNG ĐĂNG NHẬP NẾU CÓ COOKIE
+saved_user = cookie_manager.get('astrox_logged_user')
+if saved_user and not st.session_state.logged_in:
+    users_db = load_db(DB_FILE)
+    if saved_user in users_db:
+        st.session_state.logged_in = True
+        st.session_state.username = saved_user
 
+# --- TRANG ĐĂNG NHẬP / ĐĂNG KÝ ---
 if not st.session_state.logged_in:
-    tab_login, tab_register = st.tabs(["Đăng nhập", "Đăng ký"])
+    st.write("<br><br>", unsafe_allow_html=True)
+    c_left, c_mid, c_right = st.columns([1, 2, 1])
+    
+    with c_mid:
+        if os.path.exists(LOGO_FILE):
+            st.image(LOGO_FILE, width=90)
+        st.title("Astrox AI")
+        st.caption("Intelligence & Innovation — Into the Infinite Era")
+        st.write("---")
 
-    with tab_login:
-        st.subheader("Đăng nhập")
-        login_user = st.text_input("Tên đăng nhập", key="login_user")
-        login_pass = st.text_input("Mật khẩu", type="password", key="login_pass")
-        
-        if st.button("Đăng nhập", type="primary", key="btn_login"):
-            if not login_user or not login_pass:
-                st.warning("Vui lòng điền đầy đủ tên đăng nhập và mật khẩu!")
-            elif authenticate_user(login_user, login_pass):
-                st.session_state.logged_in = True
-                st.session_state.username = login_user
-                st.session_state.current_chat_id = None
-                st.session_state.messages = []
-                st.success("Đăng nhập thành công!")
-                st.rerun()
-            else:
-                st.error("Tài khoản chưa tồn tại hoặc sai mật khẩu!")
+        tab_login, tab_register = st.tabs(["Đăng nhập", "Đăng ký"])
 
-    with tab_register:
-        st.subheader("Đăng ký tài khoản mới")
-        reg_user = st.text_input("Tên đăng nhập mới", key="reg_user")
-        reg_pass = st.text_input("Mật khẩu mới", type="password", key="reg_pass")
-        reg_pass_confirm = st.text_input("Xác nhận mật khẩu", type="password", key="reg_pass_confirm")
-        
-        if st.button("Đăng ký & Vào AI ngay", type="primary", key="btn_reg"):
-            if not reg_user or not reg_pass:
-                st.warning("Vui lòng điền đầy đủ thông tin!")
-            elif reg_pass != reg_pass_confirm:
-                st.error("Mật khẩu xác nhận không khớp!")
-            else:
-                if register_user(reg_user, reg_pass):
+        with tab_login:
+            login_user = st.text_input("Tên đăng nhập", key="login_user")
+            login_pass = st.text_input("Mật khẩu", type="password", key="login_pass")
+            if st.button("Đăng nhập", type="primary", use_container_width=True, key="btn_login"):
+                if not login_user or not login_pass:
+                    st.warning("Vui lòng điền đầy đủ tên đăng nhập và mật khẩu!")
+                elif authenticate_user(login_user, login_pass):
+                    st.session_state.logged_in = True
+                    st.session_state.username = login_user
+                    st.session_state.current_chat_id = None
+                    st.session_state.messages = []
+                    # Lưu Cookie
+                    cookie_manager.set('astrox_logged_user', login_user, expires_at=None, key="set_cookie_login")
+                    st.rerun()
+                else:
+                    st.error("Tài khoản chưa tồn tại hoặc sai mật khẩu!")
+
+        with tab_register:
+            reg_user = st.text_input("Tên đăng nhập mới", key="reg_user")
+            reg_pass = st.text_input("Mật khẩu mới", type="password", key="reg_pass")
+            reg_pass_confirm = st.text_input("Xác nhận mật khẩu", type="password", key="reg_pass_confirm")
+            if st.button("Tạo tài khoản & Bắt đầu", type="primary", use_container_width=True, key="btn_reg"):
+                if not reg_user or not reg_pass:
+                    st.warning("Vui lòng điền đầy đủ thông tin!")
+                elif reg_pass != reg_pass_confirm:
+                    st.error("Mật khẩu xác nhận không khớp!")
+                elif register_user(reg_user, reg_pass):
                     st.session_state.logged_in = True
                     st.session_state.username = reg_user
                     st.session_state.current_chat_id = None
                     st.session_state.messages = []
-                    st.success("Tạo tài khoản thành công! Đang tiến vào Astrox AI...")
+                    # Lưu Cookie
+                    cookie_manager.set('astrox_logged_user', reg_user, expires_at=None, key="set_cookie_reg")
                     st.rerun()
                 else:
-                    st.error("Tên đăng nhập này đã có người sử dụng! Vui lòng chọn tên khác.")
+                    st.error("Tên đăng nhập này đã tồn tại!")
 
+# --- GIAO DIỆN CHÍNH KHI ĐÃ ĐĂNG NHẬP ---
 else:
-
-    with st.sidebar:
-        users = load_db(DB_FILE)
-        current_user_data = users.get(st.session_state.username, {}) if isinstance(users, dict) else {}
-        user_avatar_base64 = current_user_data.get("avatar_base64", "")
-        
-        col_av, col_name = st.columns([1, 2])
-        with col_av:
-            avatar_img = base64_to_image(user_avatar_base64)
-            if avatar_img:
-                st.image(avatar_img, width=60)
-            else:
-                st.markdown("👤", help="Chưa có avatar")
-        with col_name:
-            st.markdown(f"**{st.session_state.username}**")
-            if st.button("⚙️ Tài khoản", key="goto_account"):
-                st.session_state.show_account_page = not st.session_state.show_account_page
+    # HỘP THOẠI XÁC NHẬN XÓA (POPUP DIALOG CHUẨN)
+    @st.dialog("⚠️ Xác nhận xóa cuộc trò chuyện")
+    def confirm_delete_dialog(chat_id_to_del):
+        st.write("Bạn có chắc chắn muốn xóa cuộc trò chuyện này không? Hành động này không thể hoàn tác.")
+        c_yes, c_no = st.columns([1, 1])
+        with c_yes:
+            if st.button("Xóa vĩnh viễn", type="primary", use_container_width=True):
+                delete_user_chat_session(st.session_state.username, chat_id_to_del)
+                if st.session_state.current_chat_id == chat_id_to_del:
+                    st.session_state.current_chat_id = None
+                    st.session_state.messages = []
+                st.session_state.chat_to_delete = None
+                st.rerun()
+        with c_no:
+            if st.button("Hủy", use_container_width=True):
+                st.session_state.chat_to_delete = None
                 st.rerun()
 
-        st.divider()
+    if st.session_state.chat_to_delete:
+        confirm_delete_dialog(st.session_state.chat_to_delete)
 
-        if st.button("➕ Đoạn chat mới", use_container_width=True, type="primary"):
+    # --- THANH BÊN (SIDEBAR STYLE GEMINI) ---
+    with st.sidebar:
+        if os.path.exists(LOGO_FILE):
+            st.image(LOGO_FILE, width=50)
+        st.markdown("### **Astrox AI**")
+        st.caption("Asteroid 1.24")
+
+        # Nút tạo đoạn chat mới
+        if st.button("➕ Cuộc trò chuyện mới", use_container_width=True, type="primary"):
             st.session_state.current_chat_id = None
             st.session_state.messages = []
             st.session_state.show_account_page = False
             st.rerun()
 
-        st.markdown("### 🔍 Tìm kiếm chat")
-        search_kw = st.text_input("Nhập từ khóa...", key="search_chat_kw", label_visibility="collapsed")
+        st.markdown("<br>", unsafe_allow_html=True)
+        search_kw = st.text_input("🔍 Tìm kiếm...", key="search_chat_kw", label_visibility="collapsed", placeholder="🔍 Tìm kiếm lịch sử...")
 
-        st.markdown("### 📜 Lịch sử trò chuyện")
+        st.caption("LỊCH SỬ TRÒ CHUYỆN")
         user_chats = get_user_all_chats(st.session_state.username)
 
         filtered_chats = {}
@@ -210,16 +279,16 @@ else:
                         filtered_chats[c_id] = c_data
 
         if not filtered_chats:
-            st.caption("Chưa có lịch sử hoặc không tìm thấy.")
+            st.caption("Chưa có lịch sử chat.")
         else:
             for c_id, c_data in reversed(list(filtered_chats.items())):
                 title = c_data.get("title", "Trò chuyện mới")
-                display_title = title[:22] + "..." if len(title) > 22 else title
+                display_title = title[:18] + "..." if len(title) > 18 else title
                 
                 col_c1, col_c2 = st.columns([4, 1])
                 with col_c1:
                     is_current = (c_id == st.session_state.current_chat_id)
-                    btn_label = f"💬 {display_title}" if not is_current else f"👉 {display_title}"
+                    btn_label = f"💬 {display_title}" if not is_current else f"✨ {display_title}"
                     if st.button(btn_label, key=f"chat_{c_id}", use_container_width=True):
                         st.session_state.current_chat_id = c_id
                         st.session_state.messages = c_data.get("messages", [])
@@ -227,28 +296,49 @@ else:
                         st.rerun()
                 with col_c2:
                     if st.button("🗑️", key=f"del_{c_id}"):
-                        delete_user_chat_session(st.session_state.username, c_id)
-                        if st.session_state.current_chat_id == c_id:
-                            st.session_state.current_chat_id = None
-                            st.session_state.messages = []
+                        st.session_state.chat_to_delete = c_id
                         st.rerun()
 
         st.divider()
 
-        if st.button("🚪 Đăng xuất", use_container_width=True):
-            st.session_state.logged_in = False
-            st.session_state.username = ""
-            st.session_state.current_chat_id = None
-            st.session_state.messages = []
-            st.session_state.show_account_page = False
-            st.rerun()
+        # Phần Thông tin User ở góc dưới Sidebar
+        users = load_db(DB_FILE)
+        current_user_data = users.get(st.session_state.username, {}) if isinstance(users, dict) else {}
+        user_avatar_base64 = current_user_data.get("avatar_base64", "")
 
+        col_av, col_name = st.columns([1, 2])
+        with col_av:
+            avatar_img = base64_to_image(user_avatar_base64)
+            if avatar_img:
+                st.image(avatar_img, width=45)
+            else:
+                st.markdown("👤")
+        with col_name:
+            st.markdown(f"**{st.session_state.username}**")
+
+        c_act, c_logout = st.columns([1, 1])
+        with c_act:
+            if st.button("⚙️ Hồ sơ", use_container_width=True):
+                st.session_state.show_account_page = not st.session_state.show_account_page
+                st.rerun()
+        with c_logout:
+            if st.button("🚪 Thoát", use_container_width=True):
+                st.session_state.logged_in = False
+                st.session_state.username = ""
+                st.session_state.current_chat_id = None
+                st.session_state.messages = []
+                st.session_state.show_account_page = False
+                # Xóa Cookie khi Đăng xuất
+                cookie_manager.delete('astrox_logged_user', key="del_cookie_logout")
+                st.rerun()
+
+    # --- KHU VỰC HIỂN THỊ CHÍNH (MAIN CHAT AREA) ---
     if st.session_state.show_account_page:
         st.header(f"Cài đặt tài khoản: {st.session_state.username}")
         st.write("---")
         
         st.subheader("Cập nhật ảnh đại diện")
-        uploaded_file = st.file_uploader("Tải lên ảnh mới (PNG, JPG, JPEG)", type=["png", "jpg", "jpeg"])
+        uploaded_file = st.file_uploader("Chọn ảnh đại diện mới", type=["png", "jpg", "jpeg"])
         
         if uploaded_file is not None:
             try:
@@ -266,19 +356,63 @@ else:
             st.rerun()
 
     else:
-        st.subheader("Trợ lý Astrox AI")
-        st.caption("Model: **Asteroid 1.24** | Phát triển bởi: **Nguyễn Khôi Nguyên**")
+        # TRANG CHÀO MỪNG DẠNG GEMINI KHI CHƯA NHẮN TIN
+        if not st.session_state.messages:
+            st.write("<br><br>", unsafe_allow_html=True)
+            st.markdown(f"# <span style='color:#58a6ff;'>Xin chào, {st.session_state.username}</span>", unsafe_allow_html=True)
+            st.markdown("### Hôm nay **Astrox AI** có thể giúp gì cho bạn?")
+            st.write("<br>", unsafe_allow_html=True)
 
-        if not ASTROX_API_KEY:
-            st.error("Chưa cấu hình API Key cho Astrox AI!")
+            # Các gợi ý mẫu kiểu Gemini
+            col_g1, col_g2, col_g3 = st.columns(3)
+            prompt_preset = None
+
+            with col_g1:
+                st.markdown("""
+                <div class="suggestion-card">
+                    <b>💡 Ý tưởng sáng tạo</b><br>
+                    <span style="color:#8b949e; font-size: 14px;">Gợi ý kịch bản video hoặc viết bài blog hấp dẫn</span>
+                </div>
+                """, unsafe_allow_html=True)
+                if st.button("Thử gợi ý này", key="p1", use_container_width=True):
+                    prompt_preset = "Hãy gợi ý cho tôi 3 ý tưởng kịch bản video ngắn thu hút người xem."
+
+            with col_g2:
+                st.markdown("""
+                <div class="suggestion-card">
+                    <b>💻 Lập trình & Code</b><br>
+                    <span style="color:#8b949e; font-size: 14px;">Viết code Python, HTML hoặc sửa lỗi lập trình</span>
+                </div>
+                """, unsafe_allow_html=True)
+                if st.button("Thử gợi ý này", key="p2", use_container_width=True):
+                    prompt_preset = "Hãy viết cho tôi một đoạn script Python đơn giản để tải nội dung web."
+
+            with col_g3:
+                st.markdown("""
+                <div class="suggestion-card">
+                    <b>🚀 Tìm hiểu Công nghệ</b><br>
+                    <span style="color:#8b949e; font-size: 14px;">Giải thích mô hình Asteroid 1.24 và AI</span>
+                </div>
+                """, unsafe_allow_html=True)
+                if st.button("Thử gợi ý này", key="p3", use_container_width=True):
+                    prompt_preset = "Hãy giới thiệu về Astrox AI và mô hình Asteroid 1.24."
+
         else:
-            client = Groq(api_key=ASTROX_API_KEY)
-
+            # Hiển thị các tin nhắn đã trò chuyện
             for message in st.session_state.messages:
                 with st.chat_message(message["role"]):
                     st.markdown(message["content"])
 
-            if prompt := st.chat_input("Hỏi Astrox AI bất kỳ điều gì..."):
+        # NHẬP CÂU HỎI
+        prompt_input = st.chat_input("Hỏi Astrox AI bất kỳ điều gì...")
+        prompt = prompt_input or (prompt_preset if 'prompt_preset' in locals() else None)
+
+        if prompt:
+            if not ASTROX_API_KEY:
+                st.error("Chưa cấu hình API Key cho Astrox AI!")
+            else:
+                client = Groq(api_key=ASTROX_API_KEY)
+
                 if st.session_state.current_chat_id is None:
                     st.session_state.current_chat_id = str(uuid.uuid4())
                     chat_title = prompt[:30] if len(prompt) > 30 else prompt
@@ -287,6 +421,7 @@ else:
                     chat_title = current_chats.get(st.session_state.current_chat_id, {}).get("title", prompt[:30])
 
                 st.session_state.messages.append({"role": "user", "content": prompt})
+
                 with st.chat_message("user"):
                     st.markdown(prompt)
 
