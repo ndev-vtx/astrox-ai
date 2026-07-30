@@ -8,16 +8,13 @@ from dotenv import load_dotenv
 from io import BytesIO
 from PIL import Image
 
-# --- CẤU HÌNH & TẢI BIẾN MÔI TRƯỜNG ---
 load_dotenv()
 ASTROX_API_KEY = st.secrets.get("ASTROX_API_KEY", os.getenv("ASTROX_API_KEY"))
 
-# Tên file logo gốc
 LOGO_FILE = "astrox_logo.png"
 
 st.set_page_config(page_title="Astrox AI", page_icon=LOGO_FILE, layout="wide")
 
-# --- QUẢN LÝ DATABASE TRÊN MÁY / CLOUD ---
 DB_FILE = "users_db.json"
 CHATS_FILE = "chats_db.json"
 
@@ -34,7 +31,6 @@ def save_db(data, file_name):
     with open(file_name, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=4)
 
-# --- XỬ LÝ ẢNH CHUYỂN ĐỔI ---
 def image_to_base64(image):
     buffered = BytesIO()
     image.save(buffered, format="PNG")
@@ -49,7 +45,6 @@ def base64_to_image(base64_str):
     except Exception:
         return None
 
-# --- CHỨC NĂNG TÀI KHOẢN ---
 def hash_password(password):
     return hashlib.sha256(str.encode(password)).hexdigest()
 
@@ -78,7 +73,6 @@ def update_user_avatar(username, avatar_base64):
         return True
     return False
 
-# --- CHỨC NĂNG CHAT ---
 def get_user_chat_history(username):
     chats = load_db(CHATS_FILE)
     return chats.get(username, [])
@@ -88,7 +82,6 @@ def save_user_chat_history(username, messages):
     chats[username] = messages
     save_db(chats, CHATS_FILE)
 
-# --- KHỞI TẠO TRẠNG THÁI PHIÊN ---
 if "logged_in" not in st.session_state:
     st.session_state.logged_in = False
 if "username" not in st.session_state:
@@ -98,9 +91,6 @@ if "messages" not in st.session_state:
 if "show_account_page" not in st.session_state:
     st.session_state.show_account_page = False
 
-# --- GIAO DIỆN CHÍNH ---
-
-# Hiển thị Logo Astrox và Tiêu đề
 cols_head = st.columns([1, 4])
 with cols_head[0]:
     if os.path.exists(LOGO_FILE):
@@ -109,7 +99,6 @@ with cols_head[1]:
     st.title("Astrox AI")
     st.caption("Intelligence & Innovation — Into the Infinite Era")
 
-# --- LOGIN / REGISTER PAGE ---
 if not st.session_state.logged_in:
     tab_login, tab_register = st.tabs(["Đăng nhập", "Đăng ký"])
 
@@ -153,9 +142,8 @@ if not st.session_state.logged_in:
                 else:
                     st.error("Tên đăng nhập này đã có người sử dụng!")
 
-# --- CHAT & ACCOUNT PAGES (KHI ĐÃ ĐĂNG NHẬP) ---
 else:
-    # --- THANH BÊN (SIDEBAR) ---
+
     with st.sidebar:
         users = load_db(DB_FILE)
         current_user_data = users.get(st.session_state.username, {})
@@ -189,7 +177,6 @@ else:
             st.session_state.messages = []
             st.rerun()
 
-    # --- TRANG QUẢN LÝ TÀI KHOẢN ---
     if st.session_state.show_account_page:
         st.header(f"Tài khoản của {st.session_state.username}")
         st.write("---")
@@ -199,7 +186,7 @@ else:
         uploaded_file = st.file_uploader("Chọn ảnh đại diện của bạn", type=["png", "jpg", "jpeg"])
         
         if uploaded_file is not None:
-            # Xử lý và lưu ảnh
+         
             try:
                 img = Image.open(uploaded_file)
                 # Tùy chọn: Resize ảnh để tối ưu dung lượng
@@ -214,12 +201,10 @@ else:
             except Exception as e:
                 st.error(f"Lỗi xử lý ảnh: {e}")
         
-        # Quay lại trang chat
         if st.button("Quay lại chat"):
             st.session_state.show_account_page = False
             st.rerun()
 
-    # --- TRANG CHAT AI CHÍNH ---
     else:
         st.subheader("Trợ lý Astrox AI")
         
@@ -228,12 +213,10 @@ else:
         else:
             client = Groq(api_key=ASTROX_API_KEY)
 
-            # Hiển thị lịch sử chat
             for message in st.session_state.messages:
                 with st.chat_message(message["role"]):
                     st.markdown(message["content"])
 
-            # Ô nhập câu hỏi
             if prompt := st.chat_input("Hỏi Astrox AI bất kỳ điều gì..."):
                 st.session_state.messages.append({"role": "user", "content": prompt})
                 save_user_chat_history(st.session_state.username, st.session_state.messages) # Lưu ngay lập tức
@@ -259,5 +242,5 @@ else:
                     st.markdown(response)
 
                 st.session_state.messages.append({"role": "assistant", "content": response})
-                # Lưu lịch sử chat hoàn chỉnh
+
                 save_user_chat_history(st.session_state.username, st.session_state.messages)
