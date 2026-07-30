@@ -23,37 +23,61 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Quản lý Cookie (Khởi tạo trực tiếp, không dùng @st.cache_resource)
+# Quản lý Cookie
 cookie_manager = stx.CookieManager()
 
-# --- CSS TÙY CHỈNH THEO PHONG CÁCH GEMINI / DEEPSEEK ---
+# --- CSS TÙY CHỈNH NỀN TRẮNG MẶC ĐỊNH & CHỐNG LỖI TƯƠNG PHẢN ---
 st.markdown("""
 <style>
-    /* Nền chính tối giản */
+    /* Nền trắng mặc định */
     .stApp {
-        background-color: #0e1117;
-        color: #e6e6e6;
+        background-color: #ffffff;
+        color: #1f2328;
     }
     
-    /* Tùy chỉnh Sidebar */
+    /* Sidebar nền xám nhẹ thanh lịch */
     [data-testid="stSidebar"] {
-        background-color: #161b22;
-        border-right: 1px solid #30363d;
+        background-color: #f6f8fa;
+        border-right: 1px solid #d0d7de;
     }
 
-    /* Thẻ gợi ý kiểu Gemini */
+    /* Thẻ gợi ý kiểu Gemini cho nền sáng */
     .suggestion-card {
-        background-color: #1f242d;
-        border: 1px solid #30363d;
+        background-color: #f6f8fa;
+        border: 1px solid #d0d7de;
         border-radius: 12px;
         padding: 16px;
         margin-bottom: 12px;
+        color: #1f2328;
     }
     
-    /* Tối ưu ô chat */
+    /* Ô chat bo tròn hiện đại */
     .stChatInputContainer {
         border-radius: 24px !important;
-        border: 1px solid #30363d !important;
+        border: 1px solid #d0d7de !important;
+    }
+
+    /* HỖ TRỢ NỀN ĐEN: Tự động chỉnh chữ trắng khi phát hiện Dark Mode */
+    @media (prefers-color-scheme: dark) {
+        .stApp {
+            background-color: #0d1117 !important;
+            color: #f0f6fc !important;
+        }
+        [data-testid="stSidebar"] {
+            background-color: #161b22 !important;
+            border-right: 1px solid #30363d !important;
+        }
+        .suggestion-card {
+            background-color: #161b22 !important;
+            border: 1px solid #30363d !important;
+            color: #f0f6fc !important;
+        }
+        .suggestion-card span {
+            color: #8b949e !important;
+        }
+        .stChatInputContainer {
+            border: 1px solid #30363d !important;
+        }
     }
 </style>
 """, unsafe_allow_html=True)
@@ -246,7 +270,7 @@ else:
     if st.session_state.chat_to_delete:
         confirm_delete_dialog(st.session_state.chat_to_delete)
 
-    # --- THANH BÊN (SIDEBAR STYLE GEMINI) ---
+    # --- THANH BÊN (SIDEBAR) ---
     with st.sidebar:
         if os.path.exists(LOGO_FILE):
             st.image(LOGO_FILE, width=50)
@@ -355,7 +379,7 @@ else:
         # TRANG CHÀO MỪNG DẠNG GEMINI KHI CHƯA NHẮN TIN
         if not st.session_state.messages:
             st.write("<br><br>", unsafe_allow_html=True)
-            st.markdown(f"# <span style='color:#58a6ff;'>Xin chào, {st.session_state.username}</span>", unsafe_allow_html=True)
+            st.markdown(f"# <span style='color:#0969da;'>Xin chào, {st.session_state.username}</span>", unsafe_allow_html=True)
             st.markdown("### Hôm nay **Astrox AI** có thể giúp gì cho bạn?")
             st.write("<br>", unsafe_allow_html=True)
 
@@ -367,7 +391,7 @@ else:
                 st.markdown("""
                 <div class="suggestion-card">
                     <b>💡 Ý tưởng sáng tạo</b><br>
-                    <span style="color:#8b949e; font-size: 14px;">Gợi ý kịch bản video hoặc viết bài blog hấp dẫn</span>
+                    <span style="color:#57606a; font-size: 14px;">Gợi ý kịch bản video hoặc viết bài blog hấp dẫn</span>
                 </div>
                 """, unsafe_allow_html=True)
                 if st.button("Thử gợi ý này", key="p1", use_container_width=True):
@@ -377,7 +401,7 @@ else:
                 st.markdown("""
                 <div class="suggestion-card">
                     <b>💻 Lập trình & Code</b><br>
-                    <span style="color:#8b949e; font-size: 14px;">Viết code Python, HTML hoặc sửa lỗi lập trình</span>
+                    <span style="color:#57606a; font-size: 14px;">Viết code Python, HTML hoặc sửa lỗi lập trình</span>
                 </div>
                 """, unsafe_allow_html=True)
                 if st.button("Thử gợi ý này", key="p2", use_container_width=True):
@@ -387,7 +411,7 @@ else:
                 st.markdown("""
                 <div class="suggestion-card">
                     <b>🚀 Tìm hiểu Công nghệ</b><br>
-                    <span style="color:#8b949e; font-size: 14px;">Giải thích mô hình Asteroid 1.24 và AI</span>
+                    <span style="color:#57606a; font-size: 14px;">Giải thích mô hình Asteroid 1.24 và AI</span>
                 </div>
                 """, unsafe_allow_html=True)
                 if st.button("Thử gợi ý này", key="p3", use_container_width=True):
