@@ -3,6 +3,7 @@ import json
 import hashlib
 import base64
 import uuid
+import requests
 import streamlit as st
 from groq import Groq
 from google import genai
@@ -11,12 +12,17 @@ from io import BytesIO
 from PIL import Image
 import extra_streamlit_components as stx
 from duckduckgo_search import DDGS
+from tavily import TavilyClient
+from exa_py import Exa
 
 # --- CẤU HÌNH & TẢI BIẾN MÔI TRƯỜNG ---
 load_dotenv()
-# Đọc API Key từ Secrets hoặc môi trường
 ASTROX_API_KEY = st.secrets.get("ASTROX_API_KEY", os.getenv("ASTROX_API_KEY"))
-ARTICFIC_API_KEY = st.secrets.get("ARTICFIC_API_KEY", os.getenv("ARTICFIC_API_KEY"))
+INVISIBLE_API_KEY = st.secrets.get("INVISIBLE_API_KEY", os.getenv("INVISIBLE_API_KEY"))
+
+# API Keys cho Search
+TAVILY_API_KEY = st.secrets.get("TAVILY_API_KEY", os.getenv("TAVILY_API_KEY"))
+EXA_API_KEY = st.secrets.get("EXA_API_KEY", os.getenv("EXA_API_KEY"))
 
 LOGO_FILE = "astrox_logo.png"
 
@@ -30,22 +36,19 @@ st.set_page_config(
 # Quản lý Cookie
 cookie_manager = stx.CookieManager()
 
-# --- CSS TÙY CHỈNH NỀN TRẮNG MẶC ĐỊNH & CHỐNG LỖI TƯƠNG PHẢN ---
+# --- CSS TÙY CHỈNH GIAO DIỆN & MÀU SẮC ---
 st.markdown("""
 <style>
-    /* Nền trắng mặc định */
     .stApp {
         background-color: #ffffff;
         color: #1f2328;
     }
     
-    /* Sidebar nền xám nhẹ thanh lịch */
     [data-testid="stSidebar"] {
         background-color: #f6f8fa;
         border-right: 1px solid #d0d7de;
     }
 
-    /* Thẻ gợi ý kiểu Gemini cho nền sáng */
     .suggestion-card {
         background-color: #f6f8fa;
         border: 1px solid #d0d7de;
@@ -55,13 +58,11 @@ st.markdown("""
         color: #1f2328;
     }
     
-    /* Ô chat bo tròn hiện đại */
     .stChatInputContainer {
         border-radius: 24px !important;
         border: 1px solid #d0d7de !important;
     }
 
-    /* HỖ TRỢ NỀN ĐEN: Tự động chỉnh chữ trắng khi phát hiện Dark Mode */
     @media (prefers-color-scheme: dark) {
         .stApp {
             background-color: #0d1117 !important;
@@ -89,6 +90,7 @@ st.markdown("""
 # --- QUẢN LÝ DATABASE TRÊN MÁY / CLOUD ---
 DB_FILE = "users_db.json"
 CHATS_FILE = "chats_db.json"
+IP_DB_FILE = "ip_db.json"
 
 def load_db(file_name):
     if not os.path.exists(file_name):
@@ -107,16 +109,123 @@ def save_db(data, file_name):
     except Exception as e:
         st.error(f"Lỗi khi lưu dữ liệu: {e}")
 
-# --- HÀM TÌM KIẾM WEB ---
-def search_web(query, max_results=4):
+# --- XỬ LÝ LẤY IP & GIỚI HẠN SEARCH ---
+def get_client_ip():
     try:
-        results = []
-        with DDGS() as ddgs:
-            for r in ddgs.text(query, max_results=max_results):
-                results.append(f"Tiêu đề: {r.get('title')}\nTrích dẫn: {r.get('body')}\nLink: {r.get('href')}")
-        return "\n\n".join(results)
+        headers = st.context.headers
+        if headers:
+            forwarded = headers.get("X-Forwarded-For") or headers.get("x-forwarded-for")
+            if forwarded:
+                return forwarded.split(",")[0].strip()
+    except Exception:
+        pass
+    return "127.0.0.1"
+
+def get_ip_search_count(ip):
+    db = load_db(IP_DB_FILE)
+    return db.get(ip, 0)
+
+def increment_ip_search_count(ip):
+    db = load_db(IP_DB_FILE)
+    db[ip] = db.get(ip, 0) + 1
+    save_db(db, IP_DB_FILE)
+
+def get_user_search_count(username):
+    users = load_db(DB_FILE)
+    return users.get(username, {}).get("search_count", 0)
+
+def increment_user_search_count(username):
+    users = load_db(DB_FILE)
+    if username in users:
+        users[username]["search_count"] = users[username].get("search_count", 0) + 1
+        save_db(users, DB_FILE)
+
+# --- CÁC HÀM TÌM KIẾM ĐẦU VÀO (SEARCH PROVIDERS) ---
+
+def search_tavily(query):
+    if not TAVILY_API_KEY:
+        raise ValueError("Chưa có Tavily API Key")
+    client = TavilyClient(api_key=TAVILY_API_KEY)
+    response = client.search(query=query, max_results=4)
+    results = response.get("results", [])
+    if not results:
+        raise ValueError("Tavily không trả về kết quả")
+    formatted = []
+    for r in results:
+        formatted.append(f"Tiêu đề: {r.get('title')}\nTrích dẫn: {r.get('content')}\nLink: {r.get('url')}")
+    return "\n\n".join(formatted)
+
+def search_exa(query):
+    if not EXA_API_KEY:
+        raise ValueError("Chưa có Exa API Key")
+    exa = Exa(api_key=EXA_API_KEY)
+    response = exa.search_and_contents(
+        query,
+        type="neural",
+        use_autoprompt=True,
+        num_results=4,
+        text=True
+    )
+    results = getattr(response, "results", [])
+    if not results:
+        raise ValueError("Exa không trả về kết quả")
+    formatted = []
+    for r in results:
+        text_content = getattr(r, "text", "") or ""
+        snippet = (text_content[:350] + "...") if len(text_content) > 350 else text_content
+        title = getattr(r, "title", "Không có tiêu đề")
+        url = getattr(r, "url", "")
+        formatted.append(f"Tiêu đề: {title}\nTrích dẫn: {snippet}\nLink: {url}")
+    return "\n\n".join(formatted)
+
+def search_duckduckgo(query):
+    results = []
+    with DDGS() as ddgs:
+        for r in ddgs.text(query, max_results=4):
+            results.append(f"Tiêu đề: {r.get('title')}\nTrích dẫn: {r.get('body')}\nLink: {r.get('href')}")
+    if not results:
+        raise ValueError("DuckDuckGo không trả về kết quả")
+    return "\n\n".join(results)
+
+# --- HÀM TÌM KIẾM WEB ĐA TẦNG CÓ GIỚI HẠN QUOTA (Tavily -> Exa -> DuckDuckGo) ---
+def search_web_multi_fallback(query, username):
+    client_ip = get_client_ip()
+    user_count = get_user_search_count(username)
+    ip_count = get_ip_search_count(client_ip)
+
+    # Nếu Tài khoản HOẶC IP đã dùng đủ 100 lượt AI Search -> Chuyển thẳng sang DuckDuckGo
+    if user_count >= 100 or ip_count >= 100:
+        try:
+            res = search_duckduckgo(query)
+            return res, "DuckDuckGo (Đã dùng hết 100 lượt AI Search)"
+        except Exception as e:
+            return f"Lỗi DuckDuckGo: {e}", "Lỗi Tìm Kiếm"
+
+    # --- NẾU CÒN QUOTA (< 100): THỬ TAVILY -> EXA ---
+    # 1. Thử Tavily AI Search
+    try:
+        res = search_tavily(query)
+        increment_user_search_count(username)
+        increment_ip_search_count(client_ip)
+        return res, f"Tavily AI Search (Lượt {user_count + 1}/100)"
+    except Exception:
+        pass
+
+    # 2. Thử Exa Neural Search
+    try:
+        res = search_exa(query)
+        increment_user_search_count(username)
+        increment_ip_search_count(client_ip)
+        return res, f"Exa AI Search (Lượt {user_count + 1}/100)"
+    except Exception:
+        pass
+
+    # 3. Dự phòng: DuckDuckGo (Nếu cả Tavily/Exa đều lỗi kết nối)
+    try:
+        res = search_duckduckgo(query)
+        return res, "DuckDuckGo (Free)"
     except Exception as e:
-        return f"Không thể tìm kiếm web: {e}"
+        return f"Tất cả công cụ tìm kiếm đều lỗi: {e}", "Lỗi Tìm Kiếm"
 
 # --- XỬ LÝ ẢNH CHUYỂN ĐỔI ---
 def image_to_base64(image):
@@ -143,7 +252,9 @@ def register_user(username, password):
         return False
     users[username] = {
         "password": hash_password(password),
-        "avatar_base64": ""
+        "avatar_base64": "",
+        "created_ip": get_client_ip(),
+        "search_count": 0
     }
     save_db(users, DB_FILE)
     return True
@@ -203,7 +314,6 @@ if "show_account_page" not in st.session_state:
 if "chat_to_delete" not in st.session_state:
     st.session_state.chat_to_delete = None
 
-# TỰ ĐỘNG ĐĂNG NHẬP NẾU CÓ COOKIE
 saved_user = cookie_manager.get('astrox_logged_user')
 if saved_user and not st.session_state.logged_in:
     users_db = load_db(DB_FILE)
@@ -262,13 +372,12 @@ if not st.session_state.logged_in:
 
 # --- GIAO DIỆN CHÍNH KHI ĐÃ ĐĂNG NHẬP ---
 else:
-    # HỘP THOẠI XÁC NHẬN XÓA
     @st.dialog("⚠️ Xác nhận xóa cuộc trò chuyện")
     def confirm_delete_dialog(chat_id_to_del):
         st.write("Bạn có chắc chắn muốn xóa cuộc trò chuyện này không? Hành động này không thể hoàn tác.")
         c_yes, c_no = st.columns([1, 1])
         with c_yes:
-            if st.button("Xóa", type="primary", use_container_width=True):
+            if st.button("Xóa vĩnh viễn", type="primary", use_container_width=True):
                 delete_user_chat_session(st.session_state.username, chat_id_to_del)
                 if st.session_state.current_chat_id == chat_id_to_del:
                     st.session_state.current_chat_id = None
@@ -290,7 +399,6 @@ else:
         st.markdown("### **Astrox AI**")
         st.caption("Astrox Engine")
 
-        # Nút tạo đoạn chat mới
         if st.button("➕ Cuộc trò chuyện mới", use_container_width=True, type="primary"):
             st.session_state.current_chat_id = None
             st.session_state.messages = []
@@ -303,17 +411,22 @@ else:
         model_choice = st.selectbox(
             "⚡ Chọn mô hình AI:",
             options=[
-                "🚀 Asteroid Fast", 
-                "🧠 Asteroid Thông minh",
-                "⚡ Artisfic 2.0 ",
-                "✨ Artisfic 3.0 "
+                "⚡ Invisible-flash 3.5",
+                "✨ Invisible 3.6",
+                "🚀 Invisible 4.0"
             ],
             index=0,
-            help="Asteroid Fast & Artisfic phản hồi siêu nhanh. Asteroid Thông minh tư duy sâu hơn."
+            help="Invisible-flash 3.5 tư duy sâu (Groq). Invisible 3.6 & 4.0 phản hồi đa năng (Gemini)."
         )
 
-        # Bật/tắt Tìm kiếm Web
-        enable_web_search = st.toggle("🌐 Tìm kiếm Web thực tế", value=False, help="Cho phép Astrox AI tra cứu dữ liệu mới nhất trên internet.")
+        user_used = get_user_search_count(st.session_state.username)
+        remaining_search = max(0, 100 - user_used)
+        
+        enable_web_search = st.toggle(
+            f"🌐 Tìm kiếm Web (Còn {remaining_search}/100)",
+            value=False,
+            help="Tự động dùng Tavily/Exa trong 100 lượt đầu. Sau đó tự động dùng DuckDuckGo miễn phí."
+        )
 
         search_kw = st.text_input("🔍 Tìm kiếm...", key="search_chat_kw", label_visibility="collapsed", placeholder="🔍 Tìm kiếm lịch sử...")
 
@@ -351,7 +464,6 @@ else:
 
         st.divider()
 
-        # Thông tin User ở cuối Sidebar
         users = load_db(DB_FILE)
         current_user_data = users.get(st.session_state.username, {}) if isinstance(users, dict) else {}
         user_avatar_base64 = current_user_data.get("avatar_base64", "")
@@ -405,7 +517,6 @@ else:
             st.rerun()
 
     else:
-        # TRANG CHÀO MỪNG DẠNG GEMINI KHI CHƯA NHẮN TIN
         if not st.session_state.messages:
             st.write("<br><br>", unsafe_allow_html=True)
             st.markdown(f"# <span style='color:#0969da;'>Xin chào, {st.session_state.username}</span>", unsafe_allow_html=True)
@@ -446,12 +557,10 @@ else:
                     prompt_preset = "Cập nhật các tin tức công nghệ nổi bật nhất tuần này."
 
         else:
-            # Hiển thị lịch sử chat
             for message in st.session_state.messages:
                 with st.chat_message(message["role"]):
                     st.markdown(message["content"])
 
-        # NHẬP CÂU HỎI
         prompt_input = st.chat_input("Hỏi Astrox AI bất kỳ điều gì...")
         prompt = prompt_input or (prompt_preset if 'prompt_preset' in locals() else None)
 
@@ -472,27 +581,21 @@ else:
                 search_context = ""
                 if enable_web_search:
                     with st.status("🔍 Đang tìm kiếm thông tin trên Web...", expanded=False):
-                        search_results = search_web(prompt)
+                        search_results, provider_used = search_web_multi_fallback(prompt, st.session_state.username)
                         if search_results:
-                            search_context = f"\n\n[Dữ liệu tìm kiếm thời gian thực từ Web]:\n{search_results}\n\nHãy tổng hợp thông tin từ dữ liệu web trên để trả lời câu hỏi của người dùng một cách chính xác nhất."
-                            st.write("Đã tìm thấy dữ liệu liên quan!")
+                            search_context = f"\n\n[Dữ liệu tìm kiếm thời gian thực từ Web ({provider_used})]:\n{search_results}\n\nHãy tổng hợp thông tin từ dữ liệu web trên để trả lời câu hỏi của người dùng một cách chính xác nhất."
+                            st.write(f"Đã tìm thấy dữ liệu từ nguồn: **{provider_used}**")
 
-                system_instruction = (
-                    "Bạn tên là Astrox AI. "
-                    "Người sáng tạo ra bạn là Nguyễn Khôi Nguyên. "
-                    "Khi được hỏi, hãy khẳng định bạn là Astrox AI do Nguyễn Khôi Nguyên phát triển. "
-                    "Tuyệt đối không tự nhận là do Meta, OpenAI hay Google tạo ra."
-                )
-
+                system_instruction = "Bạn tên là Astrox AI, do Nguyễn Khôi Nguyên phát triển."
                 response = ""
 
-                # 1. XỬ LÝ CÁC MODEL ARTISFIC (CHẠY BẰNG ARTICFIC_API_KEY)
-                if "Artisfic" in model_choice:
-                    if not ARTICFIC_API_KEY:
-                        response = "⚠️ Chưa có API_KEY, contact 0966947956 for help"
+                # 1. XỬ LÝ CÁC MODEL INVISIBLE 3.6 / 4.0 (GEMINI API)
+                if "Invisible 3.6" in model_choice or "Invisible 4.0" in model_choice:
+                    if not INVISIBLE_API_KEY:
+                        response = "⚠️ Chưa cấu hình `INVISIBLE_API_KEY` trong Secrets!"
                     else:
                         try:
-                            gemini_client = genai.Client(api_key=ARTICFIC_API_KEY)
+                            gemini_client = genai.Client(api_key=INVISIBLE_API_KEY)
                             
                             conversation_text = f"System: {system_instruction}\n"
                             for msg in st.session_state.messages[:-1]:
@@ -500,23 +603,20 @@ else:
                             
                             conversation_text += f"User: {prompt} {search_context}"
 
-                            target_gemini_model = 'gemini-2.5-flash' if "2.0" in model_choice else 'gemini-2.5-flash'
-
                             res = gemini_client.models.generate_content(
-                                model=target_gemini_model,
+                                model='gemini-2.5-flash',
                                 contents=conversation_text
                             )
                             response = res.text
                         except Exception as e:
-                            response = f"Lỗi Artisfic API: {e}"
+                            response = f"Lỗi Gemini API: {e}"
 
-                # 2. XỬ LÝ CÁC MODEL ASTEROID (CHẠY BẰNG ASTROX_API_KEY)
+                # 2. XỬ LÝ MODEL INVISIBLE-FLASH 3.5 (GROQ API)
                 else:
                     if not ASTROX_API_KEY:
                         response = "⚠️ Chưa cấu hình `ASTROX_API_KEY` trong Secrets!"
                     else:
                         client = Groq(api_key=ASTROX_API_KEY)
-                        selected_model = "llama-3.1-8b-instant" if "Fast" in model_choice else "llama-3.3-70b-versatile"
 
                         messages_to_send = [{"role": "system", "content": system_instruction}]
                         for msg in st.session_state.messages[:-1]:
@@ -527,12 +627,12 @@ else:
 
                         try:
                             completion = client.chat.completions.create(
-                                model=selected_model,
+                                model="llama-3.3-70b-versatile",
                                 messages=messages_to_send
                             )
                             response = completion.choices[0].message.content
                         except Exception as e:
-                            response = f"Lỗi Asteroid API: {e}"
+                            response = f"Lỗi Groq API: {e}"
 
                 st.markdown(response)
 
