@@ -1,7 +1,10 @@
+streamlit
 groq
 google-genai
-duckduckgo-search
-streamlit
-extra-streamlit-components
 python-dotenv
 Pillow
+extra-streamlit-components
+duckduckgo-search
+tavily-python
+exa-py
+requests
