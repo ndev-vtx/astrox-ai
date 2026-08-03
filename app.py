@@ -3,10 +3,9 @@ import json
 import hashlib
 import base64
 import uuid
-import requests
 import streamlit as st
 from groq import Groq
-from google import genai
+import google.generativeai as genai
 from dotenv import load_dotenv
 from io import BytesIO
 from PIL import Image
@@ -130,6 +129,9 @@ def inject_custom_css():
         
         /* Căn chỉnh cụm công cụ sát xuống dưới */
         [data-testid="stBottomBlockContainer"] { padding-bottom: 10px !important; }
+        
+        /* Cải thiện hiển thị logo sidebar */
+        [data-testid="stSidebarNav"] { display: none; }
     </style>
     """
     st.markdown(css, unsafe_allow_html=True)
@@ -164,7 +166,7 @@ def extract_text_from_file(uploaded_file):
             return "\n".join([p.text for p in doc.paragraphs if p.text])
         elif filename.endswith((".txt", ".py", ".json", ".md", ".csv", ".html")):
             return uploaded_file.read().decode("utf-8", errors="ignore")
-    except Exception as e: return f"File error: {e}"
+    except Exception as e: return f"Lỗi đọc file: {e}"
     return ""
 
 def image_to_base64(image):
@@ -177,7 +179,7 @@ def base64_to_image(base64_str):
     try: return Image.open(BytesIO(base64.b64decode(base64_str)))
     except: return None
 
-# --- CHỨC NĂNG ACCOUNT & SEARCH ---
+# --- CHỨC NĂNG TÌM KIẾM VÀ GIỌNG NÓI ---
 def hash_password(password): return hashlib.sha256(str.encode(password)).hexdigest()
 def get_user_search_count(username): return load_db(DB_FILE).get(username, {}).get("search_count", 0)
 
@@ -200,6 +202,7 @@ def transcribe_audio_with_groq(audio_bytes):
         return str(transcription).strip()
     except: return ""
 
+# --- KIỂM TRA ĐĂNG NHẬP ---
 saved_user = cookie_manager.get('astrox_logged_user')
 if saved_user and not st.session_state.logged_in:
     users_db = load_db(DB_FILE)
@@ -233,7 +236,7 @@ if not st.session_state.logged_in:
                     st.session_state.username = l_user
                     cookie_manager.set('astrox_logged_user', l_user)
                     st.rerun()
-                else: st.error("Error/Lỗi!")
+                else: st.error("Tài khoản hoặc mật khẩu không đúng!")
 
         with tab_register:
             r_user = st.text_input(t["username"] + " (New)", key="reg_user")
@@ -247,19 +250,23 @@ if not st.session_state.logged_in:
                     st.session_state.username = r_user
                     cookie_manager.set('astrox_logged_user', r_user)
                     st.rerun()
-                else: st.error("Exist/Đã tồn tại!")
+                else: st.error("Tên đăng nhập đã tồn tại!")
 
 # --- GIAO DIỆN CHÍNH (ĐÃ ĐĂNG NHẬP) ---
 else:
+    # --- CẤU HÌNH API GEMINI THEO SDK CŨ (ĐỔI ĐỊNH DẠNG ĐỂ ỔN ĐỊNH) ---
+    if INVISIBLE_API_KEY:
+        genai.configure(api_key=INVISIBLE_API_KEY)
+
     # --- SIDEBAR ---
     with st.sidebar:
-        # Logo & Tiêu đề
+        # Logo & Tiêu đề được canh chỉnh lại cho đẹp
         c_logo, c_title = st.columns([1, 4])
         with c_logo:
             if os.path.exists(LOGO_FILE): st.image(LOGO_FILE, width=45)
             else: st.markdown("## ✨")
         with c_title:
-            st.markdown("### Astrox AI")
+            st.markdown("<h3 style='margin-top: 10px;'>Astrox AI</h3>", unsafe_allow_html=True)
             
         st.divider()
 
@@ -278,7 +285,8 @@ else:
             st.rerun()
         
         st.markdown("<br>", unsafe_allow_html=True)
-        model_choice = st.selectbox(t["choose_model"], ["✨ Invisible 4.0", "🚀 Invisible 3.6", "⚡ Invisible-flash 3.5"])
+        # Bỏ đi Model Flash 3.5 (vì bạn nói muốn xóa các phiên bản không cần thiết trong nhật ký)
+        model_choice = st.selectbox(t["choose_model"], ["✨ Invisible 4.0", "🚀 Invisible 3.6"])
         
         rem_search = max(0, 100 - get_user_search_count(st.session_state.username))
         enable_search = st.toggle(f"{t['web_search']} ({rem_search}/100)", value=False)
@@ -338,7 +346,7 @@ else:
             users = load_db(DB_FILE)
             users[st.session_state.username]["avatar_base64"] = image_to_base64(i)
             save_db(users, DB_FILE)
-            st.success("OK!")
+            st.success("Thành công!")
             st.rerun()
         if st.button(t["back_chat"]):
             st.session_state.show_account_page = False
@@ -370,7 +378,7 @@ else:
                         img = base64_to_image(message["image_base64"])
                         if img: st.image(img, width=300)
 
-        # Hộp Preview File
+        # Hộp Preview File khi chuẩn bị gửi
         if st.session_state.pending_attachment:
             att = st.session_state.pending_attachment
             col_inf, col_del = st.columns([9, 1])
@@ -382,7 +390,7 @@ else:
                     st.session_state.pending_attachment = None
                     st.rerun()
 
-        # THANH CÔNG CỤ TÍCH HỢP (Dấu CỘNG rút gọn)
+        # THANH CÔNG CỤ TÍCH HỢP (Dấu CỘNG rút gọn nằm sát chat input)
         t_col1, t_col2, t_col3 = st.columns([1, 1, 15])
         voice_text = ""
         
@@ -410,7 +418,7 @@ else:
         prompt_input = st.chat_input(t["chat_placeholder"])
         prompt = prompt_input or voice_text or (prompt_preset if 'prompt_preset' in locals() else None)
 
-        # XỬ LÝ GỬI TIN NHẮN
+        # XỬ LÝ GỬI TIN NHẮN VÀ TẠO PHẢN HỒI AI
         if prompt:
             active_att = st.session_state.pending_attachment
             st.session_state.pending_attachment = None
@@ -419,6 +427,9 @@ else:
             if active_att:
                 if active_att["type"] == "image":
                     pil_image = Image.open(BytesIO(active_att["bytes"]))
+                    # Chuyển đổi sang RGB để tránh lỗi nếu ảnh có đuôi PNG transparent (RGBA)
+                    if pil_image.mode != 'RGB':
+                        pil_image = pil_image.convert('RGB')
                     img_b64 = image_to_base64(pil_image)
                 elif active_att["type"] == "doc":
                     doc_text = extract_text_from_file(active_att["file_obj"])
@@ -449,26 +460,37 @@ else:
                 if doc_text: final_prompt += f"\n\n[Document content]:\n{doc_text[:12000]}"
                 response = ""
 
-                if "Invisible 4.0" in model_choice or "Invisible 3.6" in model_choice:
-                    if not INVISIBLE_API_KEY: response = "API Key Error"
+                if "Invisible" in model_choice:
+                    if not INVISIBLE_API_KEY: 
+                        response = "Lỗi: Không tìm thấy INVISIBLE_API_KEY."
                     else:
                         try:
-                            gemini_client = genai.Client(api_key=INVISIBLE_API_KEY)
-                            payload = [pil_image] if pil_image else []
-                            payload.append(final_prompt + s_context)
-                            res = gemini_client.models.generate_content(model='gemini-2.5-flash', contents=payload)
+                            # Sử dụng SDK cũ của Gemini cho độ ổn định với hình ảnh cao hơn
+                            model_name = 'gemini-1.5-pro' if "4.0" in model_choice else 'gemini-1.5-flash'
+                            model = genai.GenerativeModel(model_name)
+                            
+                            # Chuẩn bị payload (Nội dung gửi đi)
+                            contents = []
+                            if pil_image:
+                                contents.append(pil_image)
+                            contents.append(final_prompt + s_context)
+                            
+                            res = model.generate_content(contents)
                             response = res.text
-                        except Exception as e: response = f"Gemini Error: {e}"
+                        except Exception as e: 
+                            response = f"Lỗi từ Gemini API: {e}"
                 else:
-                    if pil_image: st.warning("Groq doesn't support images yet.")
-                    if not ASTROX_API_KEY: response = "API Key Error"
+                    if pil_image: st.warning("Groq chưa hỗ trợ xử lý hình ảnh.")
+                    if not ASTROX_API_KEY: 
+                        response = "Lỗi: Không tìm thấy ASTROX_API_KEY."
                     else:
                         try:
                             client = Groq(api_key=ASTROX_API_KEY)
                             msgs = [{"role": "system", "content": sys_inst}] + [{"role": m["role"], "content": m["content"]} for m in st.session_state.messages[:-1]] + [{"role": "user", "content": final_prompt + s_context}]
                             comp = client.chat.completions.create(model="llama-3.3-70b-versatile", messages=msgs)
                             response = comp.choices[0].message.content
-                        except Exception as e: response = f"Groq Error: {e}"
+                        except Exception as e: 
+                            response = f"Lỗi từ Groq API: {e}"
                 
                 st.markdown(response)
 
