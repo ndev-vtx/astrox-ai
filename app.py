@@ -15,6 +15,8 @@ from duckduckgo_search import DDGS
 from tavily import TavilyClient
 from exa_py import Exa
 from audio_recorder_streamlit import audio_recorder
+import pypdf
+import docx
 
 # --- CẤU HÌNH & TẢI BIẾN MÔI TRƯỜNG ---
 load_dotenv()
@@ -109,6 +111,27 @@ def save_db(data, file_name):
             json.dump(data, f, ensure_ascii=False, indent=4)
     except Exception as e:
         st.error(f"Lỗi khi lưu dữ liệu: {e}")
+
+# --- XỬ LÝ ĐỌC FILE TÀI LIỆU (PDF, DOCX, TXT,...) ---
+def extract_text_from_file(uploaded_file):
+    try:
+        filename = uploaded_file.name.lower()
+        if filename.endswith(".pdf"):
+            reader = pypdf.PdfReader(uploaded_file)
+            text = ""
+            for page in reader.pages:
+                extracted = page.extract_text()
+                if extracted:
+                    text += extracted + "\n"
+            return text
+        elif filename.endswith(".docx"):
+            doc = docx.Document(uploaded_file)
+            return "\n".join([p.text for p in doc.paragraphs if p.text])
+        elif filename.endswith((".txt", ".py", ".json", ".md", ".csv", ".html")):
+            return uploaded_file.read().decode("utf-8", errors="ignore")
+    except Exception as e:
+        st.error(f"Không thể đọc file {uploaded_file.name}: {e}")
+    return ""
 
 # --- XỬ LÝ LẤY IP & GIỚI HẠN SEARCH ---
 def get_client_ip():
@@ -324,6 +347,8 @@ if "show_account_page" not in st.session_state:
     st.session_state.show_account_page = False
 if "chat_to_delete" not in st.session_state:
     st.session_state.chat_to_delete = None
+if "pending_attachment" not in st.session_state:
+    st.session_state.pending_attachment = None
 
 saved_user = cookie_manager.get('astrox_logged_user')
 if saved_user and not st.session_state.logged_in:
@@ -414,6 +439,7 @@ else:
             st.session_state.current_chat_id = None
             st.session_state.messages = []
             st.session_state.show_account_page = False
+            st.session_state.pending_attachment = None
             st.rerun()
 
         st.markdown("<br>", unsafe_allow_html=True)
@@ -421,12 +447,12 @@ else:
         model_choice = st.selectbox(
             "⚡ Chọn mô hình AI:",
             options=[
-                "✨ Invisible 3.6 (Hỗ trợ Ảnh)",
-                "🚀 Invisible 4.0 (Hỗ trợ Ảnh)",
+                "✨ Invisible 3.6 (Hỗ trợ Ảnh & File)",
+                "🚀 Invisible 4.0 (Hỗ trợ Ảnh & File)",
                 "⚡ Invisible-flash 3.5 (Văn bản - Groq)"
             ],
             index=0,
-            help="Invisible 3.6 & 4.0 hỗ trợ phân tích hình ảnh (Gemini). Invisible-flash 3.5 tối ưu văn bản (Groq)."
+            help="Invisible 3.6 & 4.0 hỗ trợ xử lý hình ảnh và tài liệu. Invisible-flash 3.5 tối ưu văn bản."
         )
 
         user_used = get_user_search_count(st.session_state.username)
@@ -466,6 +492,7 @@ else:
                         st.session_state.current_chat_id = c_id
                         st.session_state.messages = c_data.get("messages", [])
                         st.session_state.show_account_page = False
+                        st.session_state.pending_attachment = None
                         st.rerun()
                 with col_c2:
                     if st.button("🗑️", key=f"del_{c_id}"):
@@ -500,6 +527,7 @@ else:
                 st.session_state.current_chat_id = None
                 st.session_state.messages = []
                 st.session_state.show_account_page = False
+                st.session_state.pending_attachment = None
                 cookie_manager.delete('astrox_logged_user', key="del_cookie_logout")
                 st.rerun()
 
@@ -572,32 +600,78 @@ else:
                         if img_display:
                             st.image(img_display, width=300)
 
-        # --- Ô ĐẦU VÀO ĐA PHƯƠNG TIỆN (AUDIO & ANH) ---
-        st.write("---")
-        col_mic, col_img_up = st.columns([1, 4])
-        
+        # --- HIỂN THỊ FILE/ẢNH ĐANG ĐỜI GỬI (PREVIEW BADGE) ---
+        if st.session_state.pending_attachment:
+            att = st.session_state.pending_attachment
+            col_att_info, col_att_del = st.columns([9, 1])
+            with col_att_info:
+                if att["type"] == "image":
+                    st.image(att["bytes"], caption=f"🖼️ Đã đính kèm ảnh: {att['name']}", width=120)
+                else:
+                    st.info(f"📄 **Tài liệu đã đính kèm:** {att['name']}")
+            with col_att_del:
+                if st.button("❌", key="btn_remove_att", help="Xóa tệp đính kèm"):
+                    st.session_state.pending_attachment = None
+                    st.rerun()
+
+        # --- THANH CÔNG CỤ ĐÍNH KÈM VÀ MICRO SANG TRỌNG ---
+        col_btn_plus, col_btn_mic, col_btn_space = st.columns([0.6, 0.6, 8.8])
+
         voice_text = ""
-        with col_mic:
-            st.caption("🎙️ Bấm để nói:")
-            audio_bytes = audio_recorder(text="", recording_color="#e8b1b5", neutral_color="#6aa3b8", icon_size="2x")
+        with col_btn_plus:
+            with st.popover("➕", help="Thêm hình ảnh hoặc tài liệu"):
+                uploaded_media = st.file_uploader(
+                    "Chọn ảnh hoặc file tài liệu:",
+                    type=["png", "jpg", "jpeg", "pdf", "docx", "txt", "md"],
+                    key="popover_file_uploader"
+                )
+                if uploaded_media is not None:
+                    fname = uploaded_media.name.lower()
+                    if fname.endswith((".png", ".jpg", ".jpeg")):
+                        st.session_state.pending_attachment = {
+                            "type": "image",
+                            "name": uploaded_media.name,
+                            "bytes": uploaded_media.getvalue()
+                        }
+                    else:
+                        st.session_state.pending_attachment = {
+                            "type": "doc",
+                            "name": uploaded_media.name,
+                            "bytes": uploaded_media.getvalue(),
+                            "file_obj": uploaded_media
+                        }
+                    st.rerun()
+
+        with col_btn_mic:
+            audio_bytes = audio_recorder(text="", recording_color="#e8b1b5", neutral_color="#6aa3b8", icon_size="1x")
             if audio_bytes:
                 with st.spinner("Đang chuyển giọng nói..."):
                     voice_text = transcribe_audio_with_groq(audio_bytes)
-                    if voice_text:
-                        st.success(f"Đã nghe: \"{voice_text}\"")
 
-        with col_img_up:
-            uploaded_chat_img = st.file_uploader("🖼️ Đính kèm hình ảnh để AI quét/phân tích (Tùy chọn):", type=["png", "jpg", "jpeg"], key="chat_img_uploader")
-
+        # Khai báo Input
         prompt_input = st.chat_input("Hỏi Astrox AI bất kỳ điều gì...")
         
-        # Ưu tiên câu hỏi: Nhập tay > Giọng nói > Nút bấm gợi ý
+        # Xác định Prompt thực sự
         prompt = prompt_input or voice_text or (prompt_preset if 'prompt_preset' in locals() else None)
 
-        if prompt or uploaded_chat_img:
-            if not prompt and uploaded_chat_img:
-                prompt = "Hãy phân tích và mô tả chi tiết bức ảnh này giúp tôi."
+        # QUY TẮC CHẶN GIẢ: CHỈ CHẠY KHI BẠN CÓ CHỮ TRONG PROMPT HOẶC BẤM ENTER
+        if prompt:
+            # Thu thập dữ liệu đính kèm (nếu có)
+            active_att = st.session_state.pending_attachment
+            st.session_state.pending_attachment = None # Reset đính kèm ngay lập tức để không lặp vô tận!
 
+            pil_image = None
+            img_b64 = ""
+            extracted_doc_text = ""
+
+            if active_att:
+                if active_att["type"] == "image":
+                    pil_image = Image.open(BytesIO(active_att["bytes"]))
+                    img_b64 = image_to_base64(pil_image)
+                elif active_att["type"] == "doc":
+                    extracted_doc_text = extract_text_from_file(active_att["file_obj"])
+
+            # Đóng gói tin nhắn gửi
             if st.session_state.current_chat_id is None:
                 st.session_state.current_chat_id = str(uuid.uuid4())
                 chat_title = prompt[:30] if len(prompt) > 30 else prompt
@@ -605,21 +679,18 @@ else:
                 current_chats = get_user_all_chats(st.session_state.username)
                 chat_title = current_chats.get(st.session_state.current_chat_id, {}).get("title", prompt[:30])
 
-            # Xử lý lưu ảnh vào tin nhắn
-            img_b64 = ""
-            pil_image = None
-            if uploaded_chat_img:
-                pil_image = Image.open(uploaded_chat_img)
-                img_b64 = image_to_base64(pil_image)
+            display_prompt = prompt
+            if active_att and active_att["type"] == "doc":
+                display_prompt += f"\n\n*(📎 Đã đính kèm tài liệu: {active_att['name']})*"
 
-            user_msg = {"role": "user", "content": prompt}
+            user_msg = {"role": "user", "content": display_prompt}
             if img_b64:
                 user_msg["image_base64"] = img_b64
 
             st.session_state.messages.append(user_msg)
 
             with st.chat_message("user"):
-                st.markdown(prompt)
+                st.markdown(display_prompt)
                 if pil_image:
                     st.image(pil_image, width=300)
 
@@ -635,7 +706,12 @@ else:
                 system_instruction = "Bạn tên là Astrox AI, do Nguyễn Khôi Nguyên phát triển."
                 response = ""
 
-                # 1. XỬ LÝ CÁC MODEL INVISIBLE 3.6 / 4.0 (GEMINI API - HỖ TRỢ XỬ LÝ ẢNH)
+                # Gộp tài liệu vào nội dung gửi cho AI (nếu có)
+                final_text_prompt = prompt
+                if extracted_doc_text:
+                    final_text_prompt += f"\n\n[Nội dung tài liệu đính kèm ({active_att['name']})]:\n{extracted_doc_text[:12000]}"
+
+                # 1. XỬ LÝ CÁC MODEL INVISIBLE 3.6 / 4.0 (GEMINI API - HỖ TRỢ XỬ LÝ ẢNH & FILE)
                 if "Invisible 3.6" in model_choice or "Invisible 4.0" in model_choice:
                     if not INVISIBLE_API_KEY:
                         response = "⚠️ Chưa cấu hình `INVISIBLE_API_KEY` trong Secrets!"
@@ -644,7 +720,6 @@ else:
                             gemini_client = genai.Client(api_key=INVISIBLE_API_KEY)
                             
                             contents_payload = []
-                            # Nếu có ảnh đính kèm -> đưa ảnh vào payload
                             if pil_image:
                                 contents_payload.append(pil_image)
 
@@ -652,7 +727,7 @@ else:
                             for msg in st.session_state.messages[:-1]:
                                 conversation_text += f"{msg['role'].capitalize()}: {msg['content']}\n"
                             
-                            conversation_text += f"User: {prompt} {search_context}"
+                            conversation_text += f"User: {final_text_prompt} {search_context}"
                             contents_payload.append(conversation_text)
 
                             res = gemini_client.models.generate_content(
@@ -663,7 +738,7 @@ else:
                         except Exception as e:
                             response = f"Lỗi Gemini Vision API: {e}"
 
-                # 2. XỬ LÝ MODEL INVISIBLE-FLASH 3.5 (GROQ API - CHỈ VĂN BẢN)
+                # 2. XỬ LÝ MODEL INVISIBLE-FLASH 3.5 (GROQ API - VĂN BẢN & TEXT TỪ FILE)
                 else:
                     if pil_image:
                         st.warning("⚠️ Model Groq hiện tại chưa hỗ trợ quét ảnh. Hệ thống đã tự động phân tích câu hỏi dạng chữ.")
@@ -676,7 +751,7 @@ else:
                         for msg in st.session_state.messages[:-1]:
                             messages_to_send.append({"role": msg["role"], "content": msg["content"]})
                         
-                        latest_user_content = prompt + search_context
+                        latest_user_content = final_text_prompt + search_context
                         messages_to_send.append({"role": "user", "content": latest_user_content})
 
                         try:
