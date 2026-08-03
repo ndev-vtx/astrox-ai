@@ -12,8 +12,6 @@ from io import BytesIO
 from PIL import Image
 import extra_streamlit_components as stx
 from duckduckgo_search import DDGS
-from tavily import TavilyClient
-from exa_py import Exa
 from audio_recorder_streamlit import audio_recorder
 import pypdf
 import docx
@@ -22,8 +20,6 @@ import docx
 load_dotenv()
 ASTROX_API_KEY = st.secrets.get("ASTROX_API_KEY", os.getenv("ASTROX_API_KEY"))
 INVISIBLE_API_KEY = st.secrets.get("INVISIBLE_API_KEY", os.getenv("INVISIBLE_API_KEY"))
-TAVILY_API_KEY = st.secrets.get("TAVILY_API_KEY", os.getenv("TAVILY_API_KEY"))
-EXA_API_KEY = st.secrets.get("EXA_API_KEY", os.getenv("EXA_API_KEY"))
 
 LOGO_FILE = "astrox_logo.png"
 
@@ -51,23 +47,17 @@ LANG = {
         "register": "Đăng ký",
         "username": "Tên đăng nhập",
         "password": "Mật khẩu",
-        "pass_confirm": "Xác nhận mật khẩu",
         "btn_login": "Đăng nhập",
         "btn_reg": "Tạo tài khoản & Bắt đầu",
         "welcome": "Xin chào, ",
         "help_today": "Hôm nay Astrox AI có thể giúp gì cho bạn?",
         "chat_placeholder": "Hỏi Astrox AI bất kỳ điều gì...",
-        "add_attachment": "➕ Đính kèm",
+        "add_attachment": "Thêm tệp đính kèm",
         "add_image": "🖼️ Thêm ảnh (JPG, PNG)",
         "upload_file": "📄 Tải tệp lên (PDF, DOCX, TXT)",
-        "mic_hint": "Bấm để thu âm",
-        "voice_converted": "Đã nghe: ",
         "search_status": "🔍 Đang tìm kiếm thông tin trên Web...",
         "attached_img": "🖼️ Đã đính kèm ảnh:",
         "attached_doc": "📄 Tài liệu đã đính kèm:",
-        "confirm_delete": "Bạn có chắc chắn muốn xóa cuộc trò chuyện này?",
-        "del_permanently": "Xóa vĩnh viễn",
-        "cancel": "Hủy",
         "settings": "Cài đặt tài khoản",
         "update_avatar": "Cập nhật ảnh đại diện",
         "back_chat": "← Quay lại trò chuyện",
@@ -92,23 +82,17 @@ LANG = {
         "register": "Register",
         "username": "Username",
         "password": "Password",
-        "pass_confirm": "Confirm Password",
         "btn_login": "Login",
         "btn_reg": "Create Account & Start",
         "welcome": "Hello, ",
         "help_today": "How can Astrox AI help you today?",
         "chat_placeholder": "Ask Astrox AI anything...",
-        "add_attachment": "➕ Attach",
+        "add_attachment": "Add attachment",
         "add_image": "🖼️ Add Image (JPG, PNG)",
         "upload_file": "📄 Upload File (PDF, DOCX, TXT)",
-        "mic_hint": "Click to record",
-        "voice_converted": "Heard: ",
         "search_status": "🔍 Searching the Web...",
         "attached_img": "🖼️ Image attached:",
         "attached_doc": "📄 Document attached:",
-        "confirm_delete": "Are you sure you want to delete this chat?",
-        "del_permanently": "Delete Permanently",
-        "cancel": "Cancel",
         "settings": "Account Settings",
         "update_avatar": "Update Avatar",
         "back_chat": "← Back to chat",
@@ -122,70 +106,39 @@ LANG = {
     }
 }
 
-# --- KHỞI TẠO TRẠNG THÁI PHIÊN (SESSION STATE) ---
-if "logged_in" not in st.session_state:
-    st.session_state.logged_in = False
-if "username" not in st.session_state:
-    st.session_state.username = ""
-if "current_chat_id" not in st.session_state:
-    st.session_state.current_chat_id = None
-if "messages" not in st.session_state:
-    st.session_state.messages = []
-if "show_account_page" not in st.session_state:
-    st.session_state.show_account_page = False
-if "chat_to_delete" not in st.session_state:
-    st.session_state.chat_to_delete = None
-if "pending_attachment" not in st.session_state:
-    st.session_state.pending_attachment = None
-if "lang" not in st.session_state:
-    st.session_state.lang = "vi"
-if "theme" not in st.session_state:
-    st.session_state.theme = "light"
+# --- KHỞI TẠO TRẠNG THÁI ---
+if "logged_in" not in st.session_state: st.session_state.logged_in = False
+if "username" not in st.session_state: st.session_state.username = ""
+if "current_chat_id" not in st.session_state: st.session_state.current_chat_id = None
+if "messages" not in st.session_state: st.session_state.messages = []
+if "show_account_page" not in st.session_state: st.session_state.show_account_page = False
+if "pending_attachment" not in st.session_state: st.session_state.pending_attachment = None
+if "lang" not in st.session_state: st.session_state.lang = "vi"
 
-t = LANG[st.session_state.lang] # Biến t chứa ngôn ngữ hiện tại
+t = LANG[st.session_state.lang]
 
-# --- CSS ĐỘNG CHO DARK/LIGHT MODE ---
-def inject_theme_css():
-    if st.session_state.theme == "dark":
-        css = """
-        <style>
-            .stApp, [data-testid="stAppViewContainer"] { background-color: #0d1117 !important; color: #f0f6fc !important; }
-            [data-testid="stSidebar"] { background-color: #161b22 !important; border-right: 1px solid #30363d !important; }
-            .suggestion-card { background-color: #161b22 !important; border: 1px solid #30363d !important; color: #f0f6fc !important; }
-            .suggestion-card span { color: #8b949e !important; }
-            .stChatInputContainer { border: 1px solid #30363d !important; background-color: #161b22 !important; }
-            textarea { color: #f0f6fc !important; }
-            p, h1, h2, h3, h4, h5, h6, span, label { color: #f0f6fc !important; }
-            .stPopoverContent { background-color: #161b22 !important; border: 1px solid #30363d !important; }
-        </style>
-        """
-    else:
-        css = """
-        <style>
-            .stApp, [data-testid="stAppViewContainer"] { background-color: #ffffff !important; color: #1f2328 !important; }
-            [data-testid="stSidebar"] { background-color: #f6f8fa !important; border-right: 1px solid #d0d7de !important; }
-            .suggestion-card { background-color: #f6f8fa !important; border: 1px solid #d0d7de !important; color: #1f2328 !important; }
-            .suggestion-card span { color: #57606a !important; }
-            .stChatInputContainer { border: 1px solid #d0d7de !important; }
-            p, h1, h2, h3, h4, h5, h6, span, label { color: #1f2328 !important; }
-        </style>
-        """
-    
-    st.markdown("""
+# --- CSS TÙY CHỈNH (CỐ ĐỊNH LIGHT MODE) ---
+def inject_custom_css():
+    css = """
     <style>
-        .suggestion-card { border-radius: 12px; padding: 16px; margin-bottom: 12px; }
-        .stChatInputContainer { border-radius: 24px !important; }
-        .toolbar-container { display: flex; gap: 10px; margin-bottom: 5px; padding-left: 10px; }
+        .stApp, [data-testid="stAppViewContainer"] { background-color: #ffffff !important; color: #1f2328 !important; }
+        [data-testid="stSidebar"] { background-color: #f6f8fa !important; border-right: 1px solid #d0d7de !important; }
+        .suggestion-card { background-color: #f6f8fa !important; border: 1px solid #d0d7de !important; color: #1f2328 !important; border-radius: 12px; padding: 16px; margin-bottom: 12px; }
+        .suggestion-card span { color: #57606a !important; }
+        .stChatInputContainer { border-radius: 24px !important; border: 1px solid #d0d7de !important; }
+        p, h1, h2, h3, h4, h5, h6, span, label { color: #1f2328 !important; }
+        
+        /* Căn chỉnh cụm công cụ sát xuống dưới */
+        [data-testid="stBottomBlockContainer"] { padding-bottom: 10px !important; }
     </style>
-    """, unsafe_allow_html=True)
+    """
     st.markdown(css, unsafe_allow_html=True)
 
-inject_theme_css()
+inject_custom_css()
 
 # --- DATABASE TẠM ---
 DB_FILE = "users_db.json"
 CHATS_FILE = "chats_db.json"
-IP_DB_FILE = "ip_db.json"
 
 def load_db(file_name):
     if not os.path.exists(file_name): return {}
@@ -211,8 +164,7 @@ def extract_text_from_file(uploaded_file):
             return "\n".join([p.text for p in doc.paragraphs if p.text])
         elif filename.endswith((".txt", ".py", ".json", ".md", ".csv", ".html")):
             return uploaded_file.read().decode("utf-8", errors="ignore")
-    except Exception as e:
-        return f"File error: {e}"
+    except Exception as e: return f"File error: {e}"
     return ""
 
 def image_to_base64(image):
@@ -225,27 +177,18 @@ def base64_to_image(base64_str):
     try: return Image.open(BytesIO(base64.b64decode(base64_str)))
     except: return None
 
-# --- CHỨC NĂNG ACCOUNT & LOGIC ---
+# --- CHỨC NĂNG ACCOUNT & SEARCH ---
 def hash_password(password): return hashlib.sha256(str.encode(password)).hexdigest()
 def get_user_search_count(username): return load_db(DB_FILE).get(username, {}).get("search_count", 0)
-def increment_user_search_count(username):
-    users = load_db(DB_FILE)
-    if username in users:
-        users[username]["search_count"] = users[username].get("search_count", 0) + 1
-        save_db(users, DB_FILE)
 
-# (Các hàm search, auth... giữ nguyên logic)
-def search_web_multi_fallback(query, username):
-    try:
-        res = search_duckduckgo(query)
-        return res, "DuckDuckGo"
-    except: return "", ""
 def search_duckduckgo(query):
     results = []
-    with DDGS() as ddgs:
-        for r in ddgs.text(query, max_results=4):
-            results.append(f"Title: {r.get('title')}\nContent: {r.get('body')}")
-    return "\n\n".join(results)
+    try:
+        with DDGS() as ddgs:
+            for r in ddgs.text(query, max_results=4):
+                results.append(f"Title: {r.get('title')}\nContent: {r.get('body')}")
+        return "\n\n".join(results)
+    except: return ""
 
 def transcribe_audio_with_groq(audio_bytes):
     if not ASTROX_API_KEY: return ""
@@ -264,7 +207,7 @@ if saved_user and not st.session_state.logged_in:
         st.session_state.logged_in = True
         st.session_state.username = saved_user
 
-# --- ĐĂNG NHẬP / ĐĂNG KÝ ---
+# --- MÀN HÌNH ĐĂNG NHẬP ---
 if not st.session_state.logged_in:
     st.write("<br><br>", unsafe_allow_html=True)
     c_left, c_mid, c_right = st.columns([1, 2, 1])
@@ -272,14 +215,12 @@ if not st.session_state.logged_in:
         if os.path.exists(LOGO_FILE): st.image(LOGO_FILE, width=90)
         st.title("Astrox AI")
         st.write("---")
-        # Chọn ngôn ngữ ngoài màn hình đăng nhập
-        col_lg1, col_lg2 = st.columns(2)
-        with col_lg1:
-             if st.radio("Language / Ngôn ngữ:", ["Tiếng Việt", "English"], horizontal=True) == "English":
-                 st.session_state.lang = "en"
-             else:
-                 st.session_state.lang = "vi"
-             t = LANG[st.session_state.lang]
+        
+        # Chọn ngôn ngữ
+        if st.radio("Language / Ngôn ngữ:", ["Tiếng Việt", "English"], horizontal=True) == "English":
+            st.session_state.lang = "en"
+        else: st.session_state.lang = "vi"
+        t = LANG[st.session_state.lang]
 
         tab_login, tab_register = st.tabs([t["login"], t["register"]])
         with tab_login:
@@ -308,26 +249,28 @@ if not st.session_state.logged_in:
                     st.rerun()
                 else: st.error("Exist/Đã tồn tại!")
 
-# --- GIAO DIỆN CHÍNH ---
+# --- GIAO DIỆN CHÍNH (ĐÃ ĐĂNG NHẬP) ---
 else:
     # --- SIDEBAR ---
     with st.sidebar:
-        col_theme, col_lang = st.columns(2)
-        with col_theme:
-            theme_choice = st.toggle("🌙 Dark Mode", value=(st.session_state.theme == "dark"))
-            new_theme = "dark" if theme_choice else "light"
-            if new_theme != st.session_state.theme:
-                st.session_state.theme = new_theme
-                st.rerun()
-        with col_lang:
-            lang_choice = st.toggle("🇺🇸 English", value=(st.session_state.lang == "en"))
-            new_lang = "en" if lang_choice else "vi"
-            if new_lang != st.session_state.lang:
-                st.session_state.lang = new_lang
-                st.rerun()
-
+        # Logo & Tiêu đề
+        c_logo, c_title = st.columns([1, 4])
+        with c_logo:
+            if os.path.exists(LOGO_FILE): st.image(LOGO_FILE, width=45)
+            else: st.markdown("## ✨")
+        with c_title:
+            st.markdown("### Astrox AI")
+            
         st.divider()
 
+        # Cài đặt ngôn ngữ
+        lang_choice = st.toggle("🇺🇸 English Mode", value=(st.session_state.lang == "en"))
+        new_lang = "en" if lang_choice else "vi"
+        if new_lang != st.session_state.lang:
+            st.session_state.lang = new_lang
+            st.rerun()
+
+        st.markdown("<br>", unsafe_allow_html=True)
         if st.button(t["new_chat"], use_container_width=True, type="primary"):
             st.session_state.current_chat_id = None
             st.session_state.messages = []
@@ -385,7 +328,7 @@ else:
                 cookie_manager.delete('astrox_logged_user')
                 st.rerun()
 
-    # --- KHU VỰC CHAT ---
+    # --- KHU VỰC CHAT CHÍNH ---
     if st.session_state.show_account_page:
         st.header(t["settings"])
         up_img = st.file_uploader(t["update_avatar"], type=["png", "jpg"])
@@ -401,11 +344,12 @@ else:
             st.session_state.show_account_page = False
             st.rerun()
     else:
+        # Lời chào & Gợi ý (Đã Fix lỗi ký tự |)
         if not st.session_state.messages:
-            st.write("<br><br>", unsafe_allow_html=True)
-            st.markdown(f"# <span style='color:#0969da;'>{t['welcome']}{st.session_state.username}</span>", unsafe_allow_html=True)
-            st.markdown(f"### {t['help_today']}")
-            st.write("<br>", unsafe_allow_html=True)
+            st.markdown("<div style='height: 30px;'></div>", unsafe_allow_html=True)
+            st.markdown(f"<h1 style='color:#0969da; margin-bottom: 5px;'>{t['welcome']}{st.session_state.username}</h1>", unsafe_allow_html=True)
+            st.markdown(f"<h3 style='margin-top: 0px;'>{t['help_today']}</h3>", unsafe_allow_html=True)
+            st.markdown("<div style='height: 30px;'></div>", unsafe_allow_html=True)
 
             col_g1, col_g2, col_g3 = st.columns(3)
             prompt_preset = None
@@ -426,27 +370,24 @@ else:
                         img = base64_to_image(message["image_base64"])
                         if img: st.image(img, width=300)
 
-        # --- THANH CÔNG CỤ TÍCH HỢP GEMINI STYLE ---
-        # Hiển thị Preview File
+        # Hộp Preview File
         if st.session_state.pending_attachment:
             att = st.session_state.pending_attachment
             col_inf, col_del = st.columns([9, 1])
             with col_inf:
-                if att["type"] == "image":
-                    st.image(att["bytes"], caption=f"{t['attached_img']} {att['name']}", width=80)
+                if att["type"] == "image": st.image(att["bytes"], caption=f"{t['attached_img']} {att['name']}", width=80)
                 else: st.info(f"{t['attached_doc']} {att['name']}")
             with col_del:
                 if st.button("❌"):
                     st.session_state.pending_attachment = None
                     st.rerun()
 
-        # Thanh Toolbar Nằm sát Input
-        st.markdown('<div class="toolbar-container">', unsafe_allow_html=True)
-        t_col1, t_col2, t_col3 = st.columns([0.5, 0.5, 9])
+        # THANH CÔNG CỤ TÍCH HỢP (Dấu CỘNG rút gọn)
+        t_col1, t_col2, t_col3 = st.columns([1, 1, 15])
         voice_text = ""
         
         with t_col1:
-            with st.popover(t["add_attachment"]):
+            with st.popover("➕", help=t["add_attachment"]):
                 st.write("**" + t["add_image"] + "**")
                 img_file = st.file_uploader("", type=["png", "jpg", "jpeg"], key="up_img")
                 st.write("---")
@@ -465,7 +406,6 @@ else:
             if audio_bytes:
                 with st.spinner("..."):
                     voice_text = transcribe_audio_with_groq(audio_bytes)
-        st.markdown('</div>', unsafe_allow_html=True)
 
         prompt_input = st.chat_input(t["chat_placeholder"])
         prompt = prompt_input or voice_text or (prompt_preset if 'prompt_preset' in locals() else None)
@@ -501,8 +441,8 @@ else:
                 s_context = ""
                 if enable_search:
                     with st.status(t["search_status"], expanded=False):
-                        s_res, p_used = search_web_multi_fallback(prompt, st.session_state.username)
-                        if s_res: s_context = f"\n\n[Web Data ({p_used})]:\n{s_res}"
+                        s_res = search_duckduckgo(prompt)
+                        if s_res: s_context = f"\n\n[Web Data]:\n{s_res}"
 
                 sys_inst = "You are Astrox AI. Answer based on the language requested."
                 final_prompt = prompt
@@ -534,7 +474,7 @@ else:
 
             st.session_state.messages.append({"role": "assistant", "content": response})
             
-            # Save Chat
+            # Lưu lịch sử chat
             all_c = load_db(CHATS_FILE)
             if st.session_state.username not in all_c: all_c[st.session_state.username] = {}
             chat_title = all_c[st.session_state.username].get(st.session_state.current_chat_id, {}).get("title", prompt[:30])
