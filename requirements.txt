@@ -8,3 +8,4 @@ duckduckgo-search
 tavily-python
 exa-py
 requests
+audio-recorder-streamlit
