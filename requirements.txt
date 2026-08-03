@@ -9,3 +9,5 @@ tavily-python
 exa-py
 requests
 audio-recorder-streamlit
+pypdf
+python-docx
