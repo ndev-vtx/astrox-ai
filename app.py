@@ -14,6 +14,7 @@ import extra_streamlit_components as stx
 from duckduckgo_search import DDGS
 from tavily import TavilyClient
 from exa_py import Exa
+from audio_recorder_streamlit import audio_recorder
 
 # --- CẤU HÌNH & TẢI BIẾN MÔI TRƯỜNG ---
 load_dotenv()
@@ -140,8 +141,24 @@ def increment_user_search_count(username):
         users[username]["search_count"] = users[username].get("search_count", 0) + 1
         save_db(users, DB_FILE)
 
-# --- CÁC HÀM TÌM KIẾM ĐẦU VÀO (SEARCH PROVIDERS) ---
+# --- HÀM CHUYỂN GIỌNG NÓI THÀNH VĂN BẢN (GROQ WHISPER FREE) ---
+def transcribe_audio_with_groq(audio_bytes):
+    if not ASTROX_API_KEY:
+        return ""
+    try:
+        client = Groq(api_key=ASTROX_API_KEY)
+        transcription = client.audio.transcriptions.create(
+            file=("speech.wav", audio_bytes),
+            model="whisper-large-v3-turbo",
+            response_format="text",
+            language="vi"
+        )
+        return str(transcription).strip()
+    except Exception as e:
+        st.error(f"Lỗi nhận diện giọng nói: {e}")
+        return ""
 
+# --- CÁC HÀM TÌM KIẾM ĐẦU VÀO (SEARCH PROVIDERS) ---
 def search_tavily(query):
     if not TAVILY_API_KEY:
         raise ValueError("Chưa có Tavily API Key")
@@ -187,13 +204,11 @@ def search_duckduckgo(query):
         raise ValueError("DuckDuckGo không trả về kết quả")
     return "\n\n".join(results)
 
-# --- HÀM TÌM KIẾM WEB ĐA TẦNG CÓ GIỚI HẠN QUOTA (Tavily -> Exa -> DuckDuckGo) ---
 def search_web_multi_fallback(query, username):
     client_ip = get_client_ip()
     user_count = get_user_search_count(username)
     ip_count = get_ip_search_count(client_ip)
 
-    # Nếu Tài khoản HOẶC IP đã dùng đủ 100 lượt AI Search -> Chuyển thẳng sang DuckDuckGo
     if user_count >= 100 or ip_count >= 100:
         try:
             res = search_duckduckgo(query)
@@ -201,8 +216,6 @@ def search_web_multi_fallback(query, username):
         except Exception as e:
             return f"Lỗi DuckDuckGo: {e}", "Lỗi Tìm Kiếm"
 
-    # --- NẾU CÒN QUOTA (< 100): THỬ TAVILY -> EXA ---
-    # 1. Thử Tavily AI Search
     try:
         res = search_tavily(query)
         increment_user_search_count(username)
@@ -211,7 +224,6 @@ def search_web_multi_fallback(query, username):
     except Exception:
         pass
 
-    # 2. Thử Exa Neural Search
     try:
         res = search_exa(query)
         increment_user_search_count(username)
@@ -220,7 +232,6 @@ def search_web_multi_fallback(query, username):
     except Exception:
         pass
 
-    # 3. Dự phòng: DuckDuckGo (Nếu cả Tavily/Exa đều lỗi kết nối)
     try:
         res = search_duckduckgo(query)
         return res, "DuckDuckGo (Free)"
@@ -407,16 +418,15 @@ else:
 
         st.markdown("<br>", unsafe_allow_html=True)
         
-        # LỰA CHỌN MÔ HÌNH AI
         model_choice = st.selectbox(
             "⚡ Chọn mô hình AI:",
             options=[
-                "⚡ Invisible-flash 3.5",
-                "✨ Invisible 3.6",
-                "🚀 Invisible 4.0"
+                "✨ Invisible 3.6 (Hỗ trợ Ảnh)",
+                "🚀 Invisible 4.0 (Hỗ trợ Ảnh)",
+                "⚡ Invisible-flash 3.5 (Văn bản - Groq)"
             ],
             index=0,
-            help="Invisible-flash 3.5 tư duy sâu (Groq). Invisible 3.6 & 4.0 phản hồi đa năng (Gemini)."
+            help="Invisible 3.6 & 4.0 hỗ trợ phân tích hình ảnh (Gemini). Invisible-flash 3.5 tối ưu văn bản (Groq)."
         )
 
         user_used = get_user_search_count(st.session_state.username)
@@ -497,10 +507,8 @@ else:
     if st.session_state.show_account_page:
         st.header(f"Cài đặt tài khoản: {st.session_state.username}")
         st.write("---")
-        
         st.subheader("Cập nhật ảnh đại diện")
         uploaded_file = st.file_uploader("Chọn ảnh đại diện mới", type=["png", "jpg", "jpeg"])
-        
         if uploaded_file is not None:
             try:
                 img = Image.open(uploaded_file)
@@ -511,7 +519,6 @@ else:
                     st.rerun()
             except Exception as e:
                 st.error(f"Lỗi khi lưu ảnh: {e}")
-        
         if st.button("← Quay lại trò chuyện"):
             st.session_state.show_account_page = False
             st.rerun()
@@ -560,11 +567,37 @@ else:
             for message in st.session_state.messages:
                 with st.chat_message(message["role"]):
                     st.markdown(message["content"])
+                    if "image_base64" in message and message["image_base64"]:
+                        img_display = base64_to_image(message["image_base64"])
+                        if img_display:
+                            st.image(img_display, width=300)
+
+        # --- Ô ĐẦU VÀO ĐA PHƯƠNG TIỆN (AUDIO & ANH) ---
+        st.write("---")
+        col_mic, col_img_up = st.columns([1, 4])
+        
+        voice_text = ""
+        with col_mic:
+            st.caption("🎙️ Bấm để nói:")
+            audio_bytes = audio_recorder(text="", recording_color="#e8b1b5", neutral_color="#6aa3b8", icon_size="2x")
+            if audio_bytes:
+                with st.spinner("Đang chuyển giọng nói..."):
+                    voice_text = transcribe_audio_with_groq(audio_bytes)
+                    if voice_text:
+                        st.success(f"Đã nghe: \"{voice_text}\"")
+
+        with col_img_up:
+            uploaded_chat_img = st.file_uploader("🖼️ Đính kèm hình ảnh để AI quét/phân tích (Tùy chọn):", type=["png", "jpg", "jpeg"], key="chat_img_uploader")
 
         prompt_input = st.chat_input("Hỏi Astrox AI bất kỳ điều gì...")
-        prompt = prompt_input or (prompt_preset if 'prompt_preset' in locals() else None)
+        
+        # Ưu tiên câu hỏi: Nhập tay > Giọng nói > Nút bấm gợi ý
+        prompt = prompt_input or voice_text or (prompt_preset if 'prompt_preset' in locals() else None)
 
-        if prompt:
+        if prompt or uploaded_chat_img:
+            if not prompt and uploaded_chat_img:
+                prompt = "Hãy phân tích và mô tả chi tiết bức ảnh này giúp tôi."
+
             if st.session_state.current_chat_id is None:
                 st.session_state.current_chat_id = str(uuid.uuid4())
                 chat_title = prompt[:30] if len(prompt) > 30 else prompt
@@ -572,10 +605,23 @@ else:
                 current_chats = get_user_all_chats(st.session_state.username)
                 chat_title = current_chats.get(st.session_state.current_chat_id, {}).get("title", prompt[:30])
 
-            st.session_state.messages.append({"role": "user", "content": prompt})
+            # Xử lý lưu ảnh vào tin nhắn
+            img_b64 = ""
+            pil_image = None
+            if uploaded_chat_img:
+                pil_image = Image.open(uploaded_chat_img)
+                img_b64 = image_to_base64(pil_image)
+
+            user_msg = {"role": "user", "content": prompt}
+            if img_b64:
+                user_msg["image_base64"] = img_b64
+
+            st.session_state.messages.append(user_msg)
 
             with st.chat_message("user"):
                 st.markdown(prompt)
+                if pil_image:
+                    st.image(pil_image, width=300)
 
             with st.chat_message("assistant"):
                 search_context = ""
@@ -589,7 +635,7 @@ else:
                 system_instruction = "Bạn tên là Astrox AI, do Nguyễn Khôi Nguyên phát triển."
                 response = ""
 
-                # 1. XỬ LÝ CÁC MODEL INVISIBLE 3.6 / 4.0 (GEMINI API)
+                # 1. XỬ LÝ CÁC MODEL INVISIBLE 3.6 / 4.0 (GEMINI API - HỖ TRỢ XỬ LÝ ẢNH)
                 if "Invisible 3.6" in model_choice or "Invisible 4.0" in model_choice:
                     if not INVISIBLE_API_KEY:
                         response = "⚠️ Chưa cấu hình `INVISIBLE_API_KEY` trong Secrets!"
@@ -597,22 +643,30 @@ else:
                         try:
                             gemini_client = genai.Client(api_key=INVISIBLE_API_KEY)
                             
+                            contents_payload = []
+                            # Nếu có ảnh đính kèm -> đưa ảnh vào payload
+                            if pil_image:
+                                contents_payload.append(pil_image)
+
                             conversation_text = f"System: {system_instruction}\n"
                             for msg in st.session_state.messages[:-1]:
                                 conversation_text += f"{msg['role'].capitalize()}: {msg['content']}\n"
                             
                             conversation_text += f"User: {prompt} {search_context}"
+                            contents_payload.append(conversation_text)
 
                             res = gemini_client.models.generate_content(
                                 model='gemini-2.5-flash',
-                                contents=conversation_text
+                                contents=contents_payload
                             )
                             response = res.text
                         except Exception as e:
-                            response = f"Lỗi Gemini API: {e}"
+                            response = f"Lỗi Gemini Vision API: {e}"
 
-                # 2. XỬ LÝ MODEL INVISIBLE-FLASH 3.5 (GROQ API)
+                # 2. XỬ LÝ MODEL INVISIBLE-FLASH 3.5 (GROQ API - CHỈ VĂN BẢN)
                 else:
+                    if pil_image:
+                        st.warning("⚠️ Model Groq hiện tại chưa hỗ trợ quét ảnh. Hệ thống đã tự động phân tích câu hỏi dạng chữ.")
                     if not ASTROX_API_KEY:
                         response = "⚠️ Chưa cấu hình `ASTROX_API_KEY` trong Secrets!"
                     else:
@@ -620,7 +674,7 @@ else:
 
                         messages_to_send = [{"role": "system", "content": system_instruction}]
                         for msg in st.session_state.messages[:-1]:
-                            messages_to_send.append(msg)
+                            messages_to_send.append({"role": msg["role"], "content": msg["content"]})
                         
                         latest_user_content = prompt + search_context
                         messages_to_send.append({"role": "user", "content": latest_user_content})
