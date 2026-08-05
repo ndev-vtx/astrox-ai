@@ -5,6 +5,7 @@ import base64
 import uuid
 from io import BytesIO
 from PIL import Image
+import requests
 
 import streamlit as st
 from dotenv import load_dotenv
@@ -35,6 +36,8 @@ def get_secret(key_name, default=""):
 
 ASTROX_API_KEY = get_secret("ASTROX_API_KEY")
 INVISIBLE_API_KEY = get_secret("INVISIBLE_API_KEY")
+TAVILY_API_KEY = get_secret("TAVILY_API_KEY")
+EXA_API_KEY = get_secret("EXA_API_KEY")
 
 LOGO_FILE = "astrox_logo.png"
 
@@ -45,7 +48,7 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Khởi tạo Cookie Manager an toàn (KHÔNG dùng @st.cache_resource vì gây sập app!)
+# Khởi tạo Cookie Manager an toàn (KHÔNG dùng @st.cache_resource)
 try:
     cookie_manager = stx.CookieManager(key="astrox_cookie_mgr")
 except Exception:
@@ -59,6 +62,7 @@ LANG = {
         "new_chat": "➕ Cuộc trò chuyện mới",
         "choose_model": "⚡ Chọn mô hình AI:",
         "web_search": "🌐 Tìm kiếm Web",
+        "search_provider": "⚙️ Công cụ tìm kiếm:",
         "search_hist_placeholder": "🔍 Tìm kiếm lịch sử...",
         "chat_hist": "LỊCH SỬ TRÒ CHUYỆN",
         "no_hist": "Chưa có lịch sử chat nào.",
@@ -94,6 +98,7 @@ LANG = {
         "new_chat": "➕ New Chat",
         "choose_model": "⚡ Choose AI Model:",
         "web_search": "🌐 Web Search",
+        "search_provider": "⚙️ Search Provider:",
         "search_hist_placeholder": "🔍 Search history...",
         "chat_hist": "CHAT HISTORY",
         "no_hist": "No chat history yet.",
@@ -238,7 +243,7 @@ def base64_to_image(base64_str):
         return None
 
 # ==========================================
-# 7. TÌM KIẾM WEB & NHẬN DẠNG GIỌNG NÓI
+# 7. CÁC HÀM TÌM KIẾM WEB (DDG, TAVILY, EXA)
 # ==========================================
 def search_duckduckgo(query):
     results = []
@@ -246,9 +251,48 @@ def search_duckduckgo(query):
         with DDGS() as ddgs:
             for r in ddgs.text(query, max_results=4):
                 results.append(f"📌 **{r.get('title')}**\n{r.get('body')}")
-        return "\n\n".join(results)
+        return "\n\n".join(results) if results else "Không tìm thấy kết quả từ DuckDuckGo."
     except Exception as e:
-        return f"Lỗi tìm kiếm: {e}"
+        return f"Lỗi DuckDuckGo Search: {e}"
+
+def search_tavily(query, api_key):
+    if not api_key:
+        return "⚠️ Chưa cấu hình TAVILY_API_KEY trong Secrets hoặc .env"
+    try:
+        url = "https://api.tavily.com/search"
+        payload = {"api_key": api_key, "query": query, "max_results": 4}
+        res = requests.post(url, json=payload, timeout=10)
+        if res.status_code == 200:
+            data = res.json().get("results", [])
+            out = [f"📌 **{r.get('title')}**\n{r.get('content')}" for r in data]
+            return "\n\n".join(out) if out else "Không tìm thấy kết quả từ Tavily."
+        return f"Lỗi Tavily API: {res.status_code} - {res.text}"
+    except Exception as e:
+        return f"Lỗi kết nối Tavily Search: {e}"
+
+def search_exa(query, api_key):
+    if not api_key:
+        return "⚠️ Chưa cấu hình EXA_API_KEY trong Secrets hoặc .env"
+    try:
+        url = "https://api.exa.ai/search"
+        headers = {"accept": "application/json", "content-type": "application/json", "x-api-key": api_key}
+        payload = {"query": query, "numResults": 4, "contents": {"text": True}}
+        res = requests.post(url, json=payload, headers=headers, timeout=10)
+        if res.status_code == 200:
+            data = res.json().get("results", [])
+            out = [f"📌 **{r.get('title')}**\n{r.get('text', '')[:300]}..." for r in data]
+            return "\n\n".join(out) if out else "Không tìm thấy kết quả từ Exa."
+        return f"Lỗi Exa API: {res.status_code} - {res.text}"
+    except Exception as e:
+        return f"Lỗi kết nối Exa Search: {e}"
+
+def execute_web_search(provider, query):
+    if provider == "Tavily Search":
+        return search_tavily(query, TAVILY_API_KEY)
+    elif provider == "Exa Search":
+        return search_exa(query, EXA_API_KEY)
+    else:
+        return search_duckduckgo(query)
 
 def transcribe_audio_with_groq(audio_bytes):
     if not ASTROX_API_KEY: return ""
@@ -368,6 +412,14 @@ else:
         
         rem_search = max(0, 100 - get_user_search_count(st.session_state.username))
         enable_search = st.toggle(f"{t['web_search']} ({rem_search}/100)", value=False)
+        
+        search_provider = "DuckDuckGo"
+        if enable_search:
+            search_provider = st.selectbox(
+                t["search_provider"], 
+                ["DuckDuckGo (Free)", "Tavily Search", "Exa Search"]
+            )
+
         search_kw = st.text_input("🔍", key="search_kw", label_visibility="collapsed", placeholder=t["search_hist_placeholder"])
 
         st.caption(t["chat_hist"])
@@ -561,10 +613,11 @@ else:
             with st.chat_message("assistant"):
                 s_context = ""
                 if enable_search:
-                    with st.status(t["search_status"], expanded=False):
-                        s_res = search_duckduckgo(prompt)
+                    provider_clean = search_provider.replace(" (Free)", "")
+                    with st.status(f"{t['search_status']} ({provider_clean})", expanded=False):
+                        s_res = execute_web_search(provider_clean, prompt)
                         if s_res:
-                            s_context = f"\n\n[Dữ liệu Tìm kiếm Web]:\n{s_res}"
+                            s_context = f"\n\n[Dữ liệu Tìm kiếm Web từ {provider_clean}]:\n{s_res}"
 
                 final_prompt = prompt
                 if doc_text:
