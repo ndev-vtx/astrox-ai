@@ -9,7 +9,7 @@ from PIL import Image
 import streamlit as st
 from dotenv import load_dotenv
 
-# Thư viện xử lý AI và Tìm kiếm
+# Thư viện AI & Tìm kiếm
 from groq import Groq
 import google.generativeai as genai
 from duckduckgo_search import DDGS
@@ -21,12 +21,20 @@ import pypdf
 import docx
 
 # ==========================================
-# 1. CẤU HÌNH BAN ĐẦU & TẢI BIẾN MÔI TRƯỜNG
+# 1. CẤU HÌNH BAN ĐẦU & LẤY SECRET AN TOÀN
 # ==========================================
 load_dotenv()
 
-ASTROX_API_KEY = st.secrets.get("ASTROX_API_KEY", os.getenv("ASTROX_API_KEY", ""))
-INVISIBLE_API_KEY = st.secrets.get("INVISIBLE_API_KEY", os.getenv("INVISIBLE_API_KEY", ""))
+def get_secret(key_name, default=""):
+    try:
+        if key_name in st.secrets:
+            return st.secrets[key_name]
+    except Exception:
+        pass
+    return os.getenv(key_name, default)
+
+ASTROX_API_KEY = get_secret("ASTROX_API_KEY")
+INVISIBLE_API_KEY = get_secret("INVISIBLE_API_KEY")
 
 LOGO_FILE = "astrox_logo.png"
 
@@ -37,12 +45,11 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Khởi tạo Cookie Manager an toàn (Cached)
-@st.cache_resource
-def get_cookie_manager():
-    return stx.CookieManager()
-
-cookie_manager = get_cookie_manager()
+# Khởi tạo Cookie Manager an toàn (KHÔNG dùng @st.cache_resource vì gây sập app!)
+try:
+    cookie_manager = stx.CookieManager(key="astrox_cookie_mgr")
+except Exception:
+    cookie_manager = None
 
 # ==========================================
 # 2. TỪ ĐIỂN ĐA NGÔN NGỮ (i18n)
@@ -139,7 +146,6 @@ t = LANG[st.session_state.lang]
 def inject_custom_css():
     css = """
     <style>
-        /* Màu nền chủ đạo Light Mode */
         .stApp, [data-testid="stAppViewContainer"] { 
             background-color: #ffffff !important; 
             color: #1f2328 !important; 
@@ -148,8 +154,6 @@ def inject_custom_css():
             background-color: #f6f8fa !important; 
             border-right: 1px solid #d0d7de !important; 
         }
-        
-        /* Card gợi ý */
         .suggestion-card { 
             background-color: #f6f8fa !important; 
             border: 1px solid #d0d7de !important; 
@@ -160,17 +164,11 @@ def inject_custom_css():
             min-height: 100px;
         }
         .suggestion-card span { color: #57606a !important; font-size: 0.9em; }
-        
-        /* Cấu hình khung Chat Input */
         .stChatInputContainer { 
             border-radius: 20px !important; 
             border: 1px solid #d0d7de !important; 
         }
-        
-        /* Màu chữ chung */
         p, h1, h2, h3, h4, h5, h6, span, label { color: #1f2328 !important; }
-        
-        /* Căn chỉnh khoảng cách dưới cùng */
         [data-testid="stBottomBlockContainer"] { padding-bottom: 12px !important; }
         [data-testid="stSidebarNav"] { display: none; }
     </style>
@@ -267,17 +265,18 @@ def transcribe_audio_with_groq(audio_bytes):
         return ""
 
 # ==========================================
-# 8. KIỂM TRA ĐĂNG NHẬP QUA COOKIE
+# 8. KIỂM TRA ĐĂNG NHẬP QUA COOKIE AN TOÀN
 # ==========================================
-try:
-    saved_user = cookie_manager.get('astrox_logged_user')
-    if saved_user and not st.session_state.logged_in:
-        users_db = load_db(DB_FILE)
-        if saved_user in users_db:
-            st.session_state.logged_in = True
-            st.session_state.username = saved_user
-except Exception:
-    pass
+if cookie_manager:
+    try:
+        saved_user = cookie_manager.get('astrox_logged_user')
+        if saved_user and not st.session_state.logged_in:
+            users_db = load_db(DB_FILE)
+            if saved_user in users_db:
+                st.session_state.logged_in = True
+                st.session_state.username = saved_user
+    except Exception:
+        pass
 
 # ==========================================
 # 9. GIAO DIỆN CHƯA ĐĂNG NHẬP
@@ -291,7 +290,6 @@ if not st.session_state.logged_in:
         st.title("Astrox AI")
         st.write("---")
         
-        # Lựa chọn ngôn ngữ
         lang_sel = st.radio("Language / Ngôn ngữ:", ["Tiếng Việt", "English"], horizontal=True)
         st.session_state.lang = "en" if lang_sel == "English" else "vi"
         t = LANG[st.session_state.lang]
@@ -306,8 +304,9 @@ if not st.session_state.logged_in:
                 if l_user in users and users[l_user].get("password") == hash_password(l_pass):
                     st.session_state.logged_in = True
                     st.session_state.username = l_user
-                    try: cookie_manager.set('astrox_logged_user', l_user)
-                    except: pass
+                    if cookie_manager:
+                        try: cookie_manager.set('astrox_logged_user', l_user)
+                        except Exception: pass
                     st.rerun()
                 else:
                     st.error("Tên đăng nhập hoặc mật khẩu không chính xác!")
@@ -325,8 +324,9 @@ if not st.session_state.logged_in:
                         save_db(users, DB_FILE)
                         st.session_state.logged_in = True
                         st.session_state.username = r_user
-                        try: cookie_manager.set('astrox_logged_user', r_user)
-                        except: pass
+                        if cookie_manager:
+                            try: cookie_manager.set('astrox_logged_user', r_user)
+                            except Exception: pass
                         st.rerun()
                     else:
                         st.error("Tên đăng nhập này đã tồn tại!")
@@ -335,11 +335,10 @@ if not st.session_state.logged_in:
 # 10. GIAO DIỆN CHÍNH (ĐÃ ĐĂNG NHẬP)
 # ==========================================
 else:
-    # --- CẤU HÌNH GEMINI API ---
     if INVISIBLE_API_KEY:
         genai.configure(api_key=INVISIBLE_API_KEY)
 
-    # --- THANH BEN (SIDEBAR) ---
+    # --- SIDEBAR ---
     with st.sidebar:
         c_logo, c_title = st.columns([1, 4])
         with c_logo:
@@ -352,14 +351,12 @@ else:
             
         st.divider()
 
-        # Đổi ngôn ngữ
         lang_choice = st.toggle("🇺🇸 English Mode", value=(st.session_state.lang == "en"))
         new_lang = "en" if lang_choice else "vi"
         if new_lang != st.session_state.lang:
             st.session_state.lang = new_lang
             st.rerun()
 
-        # Nút Cuộc trò chuyện mới
         if st.button(t["new_chat"], use_container_width=True, type="primary"):
             st.session_state.current_chat_id = None
             st.session_state.messages = []
@@ -421,13 +418,13 @@ else:
             if st.button(t["logout"], use_container_width=True):
                 st.session_state.logged_in = False
                 st.session_state.username = ""
-                try: cookie_manager.delete('astrox_logged_user')
-                except: pass
+                if cookie_manager:
+                    try: cookie_manager.delete('astrox_logged_user')
+                    except Exception: pass
                 st.rerun()
 
-    # --- KHU VỰC NỘI DUNG CHÍNH ---
+    # --- NỘI DUNG CHÍNH ---
     if st.session_state.show_account_page:
-        # Trang cài đặt hồ sơ
         st.header(t["settings"])
         up_img = st.file_uploader(t["update_avatar"], type=["png", "jpg", "jpeg"])
         if up_img:
@@ -444,10 +441,8 @@ else:
             st.rerun()
             
     else:
-        # Trang trò chuyện
         prompt_preset = None
         
-        # Màn hình chào mừng khi chưa có tin nhắn
         if not st.session_state.messages:
             st.markdown("<div style='height: 20px;'></div>", unsafe_allow_html=True)
             st.markdown(f"<h1 style='color:#0969da; margin-bottom: 5px;'>{t['welcome']}{st.session_state.username} 👋</h1>", unsafe_allow_html=True)
@@ -469,7 +464,6 @@ else:
                     prompt_preset = "What are the latest AI news this week?" if st.session_state.lang == "en" else "Tin tức AI mới nhất tuần này là gì?"
         
         else:
-            # Hiển thị lịch sử tin nhắn
             for message in st.session_state.messages:
                 with st.chat_message(message["role"]):
                     st.markdown(message["content"])
@@ -477,7 +471,6 @@ else:
                         img = base64_to_image(message["image_base64"])
                         if img: st.image(img, width=320)
 
-        # Khung xem trước tệp đính kèm đang chờ gửi
         if st.session_state.pending_attachment:
             att = st.session_state.pending_attachment
             col_inf, col_del = st.columns([9, 1])
@@ -491,7 +484,7 @@ else:
                     st.session_state.pending_attachment = None
                     st.rerun()
 
-        # THANH CÔNG CỤ DƯỚI CÙNG (NÚT ➕ VÀ GHI ÂM GIỌNG NÓI)
+        # CỤM CÔNG CỤ TÍCH HỢP
         t_col1, t_col2, t_col3 = st.columns([1, 1, 15])
         voice_text = ""
         
@@ -524,25 +517,21 @@ else:
                 with st.spinner("..."):
                     voice_text = transcribe_audio_with_groq(audio_bytes)
 
-        # Khung nhập liệu tin nhắn
         prompt_input = st.chat_input(t["chat_placeholder"])
         prompt = prompt_input or voice_text or prompt_preset
 
-        # XỬ LÝ KHI NGƯỜI DÙNG GỬI TIN NHẮN
         if prompt:
             active_att = st.session_state.pending_attachment
-            st.session_state.pending_attachment = None # Clear trạng thái sau khi đã lấy dữ liệu
+            st.session_state.pending_attachment = None
 
             pil_image = None
             img_b64 = ""
             doc_text = ""
 
-            # Xử lý đính kèm nếu có
             if active_att:
                 if active_att["type"] == "image":
                     try:
                         pil_image = Image.open(BytesIO(active_att["bytes"]))
-                        # Chuyển hệ màu sang RGB để tránh lỗi PNG trong suốt
                         if pil_image.mode != "RGB":
                             pil_image = pil_image.convert("RGB")
                         img_b64 = image_to_base64(pil_image)
@@ -552,12 +541,10 @@ else:
                 elif active_att["type"] == "doc":
                     doc_text = extract_text_from_file(active_att["bytes"], active_att["name"])
 
-            # Chuẩn bị nội dung hiển thị
             display_prompt = prompt
             if active_att and active_att["type"] == "doc":
                 display_prompt += f"\n\n*(📎 {t['attached_doc']} {active_att['name']})*"
 
-            # Thêm tin nhắn người dùng vào bộ nhớ
             user_msg = {"role": "user", "content": display_prompt}
             if img_b64:
                 user_msg["image_base64"] = img_b64
@@ -566,13 +553,11 @@ else:
             if not st.session_state.current_chat_id:
                 st.session_state.current_chat_id = str(uuid.uuid4())
 
-            # Render tin nhắn người dùng ngay lập tức
             with st.chat_message("user"):
                 st.markdown(display_prompt)
                 if pil_image:
                     st.image(pil_image, width=320)
 
-            # AI Phản hồi
             with st.chat_message("assistant"):
                 s_context = ""
                 if enable_search:
@@ -587,39 +572,35 @@ else:
 
                 response = ""
 
-                # --- XỬ LÝ GỬI MÔ HÌNH GEMINI (INVISIBLE) ---
+                # --- XỬ LÝ GEMINI (INVISIBLE) ---
                 if "Invisible" in model_choice:
                     if not INVISIBLE_API_KEY:
-                        response = "⚠️ **Lỗi**: Chưa cấu hình `INVISIBLE_API_KEY` trong Secrets hoặc file `.env`."
+                        response = "⚠️ **Lỗi**: Chưa cấu hình `INVISIBLE_API_KEY`."
                     else:
                         try:
-                            # Xác định phiên bản model
                             selected_gemini_model = 'gemini-1.5-pro' if "4.0" in model_choice else 'gemini-1.5-flash'
                             model = genai.GenerativeModel(selected_gemini_model)
                             
-                            # Chuẩn bị danh sách nội dung gửi Gemini
                             contents = []
                             if pil_image:
                                 contents.append(pil_image)
                             contents.append(final_prompt + s_context)
                             
-                            # Gọi API Gemini
                             res = model.generate_content(contents)
-                            response = res.text if res.text else "AI không trả về kết quả."
-                            
+                            response = res.text if res and res.text else "AI không trả về kết quả."
                         except Exception as e:
-                            response = f"❌ **Lỗi API Gemini/Invisible**: {str(e)}"
+                            response = f"❌ **Lỗi API Gemini**: {e}"
                 
-                # --- XỬ LÝ GỬI MÔ HÌNH GROQ (LLAMA) ---
+                # --- XỬ LÝ GROQ (LLAMA) ---
                 else:
                     if pil_image:
-                        st.warning("⚠️ Llama trên Groq hiện chưa hỗ trợ đọc trực tiếp hình ảnh, chỉ nhận Text.")
+                        st.warning("⚠️ Llama trên Groq hiện chưa hỗ trợ đọc trực tiếp hình ảnh.")
                     if not ASTROX_API_KEY:
-                        response = "⚠️ **Lỗi**: Chưa cấu hình `ASTROX_API_KEY` trong Secrets hoặc file `.env`."
+                        response = "⚠️ **Lỗi**: Chưa cấu hình `ASTROX_API_KEY`."
                     else:
                         try:
                             client = Groq(api_key=ASTROX_API_KEY)
-                            sys_inst = "You are Astrox AI assistant. Respond helpfully and directly in the requested language."
+                            sys_inst = "You are Astrox AI assistant. Respond helpfully."
                             
                             msgs = [{"role": "system", "content": sys_inst}]
                             for m in st.session_state.messages[:-1]:
@@ -632,14 +613,12 @@ else:
                             )
                             response = comp.choices[0].message.content
                         except Exception as e:
-                            response = f"❌ **Lỗi API Groq**: {str(e)}"
+                            response = f"❌ **Lỗi API Groq**: {e}"
 
                 st.markdown(response)
 
-            # Lưu phản hồi của AI vào Session State
             st.session_state.messages.append({"role": "assistant", "content": response})
             
-            # Lưu lịch sử cuộc trò chuyện vào file JSON
             all_chats = load_db(CHATS_FILE)
             if st.session_state.username not in all_chats:
                 all_chats[st.session_state.username] = {}
@@ -653,5 +632,4 @@ else:
                 "messages": st.session_state.messages
             }
             save_db(all_chats, CHATS_FILE)
-            
             st.rerun()
