@@ -1,4 +1,4 @@
-import os
+app_code = '''import os
 import json
 import hashlib
 import base64
@@ -22,17 +22,44 @@ import pypdf
 import docx
 
 # ==========================================
-# 1. CẤU HÌNH BAN ĐẦU & LẤY SECRET AN TOÀN
+# 1. CẤU HÌNH BAN ĐẦU & LẤY SECRET AN TOÀN NÂNG CAO
 # ==========================================
 load_dotenv()
 
 def get_secret(key_name, default=""):
+    """
+    Hàm lấy Secret thông minh:
+    1. Tìm trong st.secrets (cả chữ HOA, chữ thường)
+    2. Tìm trong os.environ (cả chữ HOA, chữ thường)
+    3. Tự động strip() bỏ khoảng trắng/xuống dòng thừa
+    """
+    candidates = [key_name, key_name.lower(), key_name.upper()]
+    
+    # 1. Tìm trong st.secrets
     try:
-        if key_name in st.secrets:
-            return st.secrets[key_name]
+        if hasattr(st, "secrets") and st.secrets:
+            for k in candidates:
+                if k in st.secrets and st.secrets[k]:
+                    val = str(st.secrets[k]).strip().strip('"').strip("'")
+                    if val: return val
+            # Kiểm tra nếu nằm trong dict con (vd: [secrets] hoặc [api_keys])
+            for sec_k, sec_v in st.secrets.items():
+                if isinstance(sec_v, dict):
+                    for k in candidates:
+                        if k in sec_v and sec_v[k]:
+                            val = str(sec_v[k]).strip().strip('"').strip("'")
+                            if val: return val
     except Exception:
         pass
-    return os.getenv(key_name, default)
+
+    # 2. Tìm trong os.getenv / Environment variables
+    for k in candidates:
+        val = os.getenv(k)
+        if val:
+            val_clean = str(val).strip().strip('"').strip("'")
+            if val_clean: return val_clean
+
+    return default
 
 ASTROX_API_KEY = get_secret("ASTROX_API_KEY")
 INVISIBLE_API_KEY = get_secret("INVISIBLE_API_KEY")
@@ -48,7 +75,7 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Khởi tạo Cookie Manager an toàn (KHÔNG dùng @st.cache_resource)
+# Khởi tạo Cookie Manager an toàn
 try:
     cookie_manager = stx.CookieManager(key="astrox_cookie_mgr")
 except Exception:
@@ -220,10 +247,10 @@ def extract_text_from_file(file_bytes, filename):
         
         if ext == "pdf":
             reader = pypdf.PdfReader(bio)
-            return "\n".join([p.extract_text() for p in reader.pages if p.extract_text()])
+            return "\\n".join([p.extract_text() for p in reader.pages if p.extract_text()])
         elif ext == "docx":
             doc = docx.Document(bio)
-            return "\n".join([p.text for p in doc.paragraphs if p.text])
+            return "\\n".join([p.text for p in doc.paragraphs if p.text])
         elif ext in ["txt", "py", "json", "md", "csv", "html"]:
             return bio.read().decode("utf-8", errors="ignore")
     except Exception as e:
@@ -250,29 +277,29 @@ def search_duckduckgo(query):
     try:
         with DDGS() as ddgs:
             for r in ddgs.text(query, max_results=4):
-                results.append(f"📌 **{r.get('title')}**\n{r.get('body')}")
-        return "\n\n".join(results) if results else "Không tìm thấy kết quả từ DuckDuckGo."
+                results.append(f"📌 **{r.get('title')}**\\n{r.get('body')}")
+        return "\\n\\n".join(results) if results else "Không tìm thấy kết quả từ DuckDuckGo."
     except Exception as e:
         return f"Lỗi DuckDuckGo Search: {e}"
 
 def search_tavily(query, api_key):
     if not api_key:
-        return "⚠️ Chưa cấu hình TAVILY_API_KEY trong Secrets hoặc .env"
+        return "⚠️ Chưa nhận diện được `TAVILY_API_KEY`. Vui lòng kiểm tra file `.streamlit/secrets.toml` hoặc `.env`."
     try:
         url = "https://api.tavily.com/search"
         payload = {"api_key": api_key, "query": query, "max_results": 4}
         res = requests.post(url, json=payload, timeout=10)
         if res.status_code == 200:
             data = res.json().get("results", [])
-            out = [f"📌 **{r.get('title')}**\n{r.get('content')}" for r in data]
-            return "\n\n".join(out) if out else "Không tìm thấy kết quả từ Tavily."
-        return f"Lỗi Tavily API: {res.status_code} - {res.text}"
+            out = [f"📌 **{r.get('title')}**\\n{r.get('content')}" for r in data]
+            return "\\n\\n".join(out) if out else "Không tìm thấy kết quả từ Tavily."
+        return f"Lỗi Tavily API (Mã {res.status_code}): {res.text}"
     except Exception as e:
         return f"Lỗi kết nối Tavily Search: {e}"
 
 def search_exa(query, api_key):
     if not api_key:
-        return "⚠️ Chưa cấu hình EXA_API_KEY trong Secrets hoặc .env"
+        return "⚠️ Chưa nhận diện được `EXA_API_KEY`. Vui lòng kiểm tra file `.streamlit/secrets.toml` hoặc `.env`."
     try:
         url = "https://api.exa.ai/search"
         headers = {"accept": "application/json", "content-type": "application/json", "x-api-key": api_key}
@@ -280,9 +307,9 @@ def search_exa(query, api_key):
         res = requests.post(url, json=payload, headers=headers, timeout=10)
         if res.status_code == 200:
             data = res.json().get("results", [])
-            out = [f"📌 **{r.get('title')}**\n{r.get('text', '')[:300]}..." for r in data]
-            return "\n\n".join(out) if out else "Không tìm thấy kết quả từ Exa."
-        return f"Lỗi Exa API: {res.status_code} - {res.text}"
+            out = [f"📌 **{r.get('title')}**\\n{r.get('text', '')[:300]}..." for r in data]
+            return "\\n\\n".join(out) if out else "Không tìm thấy kết quả từ Exa."
+        return f"Lỗi Exa API (Mã {res.status_code}): {res.text}"
     except Exception as e:
         return f"Lỗi kết nối Exa Search: {e}"
 
@@ -419,6 +446,13 @@ else:
                 t["search_provider"], 
                 ["DuckDuckGo (Free)", "Tavily Search", "Exa Search"]
             )
+
+        # MỤC TRẠNG THÁI API KEYS (GIÚP DEBUG DỄ DÀNG)
+        with st.expander("🔑 Trạng thái API Keys", expanded=False):
+            st.caption(f"• **Invisible (Gemini):** {'✅ Đã load' if INVISIBLE_API_KEY else '❌ Thiếu Key'}")
+            st.caption(f"• **Astrox (Groq):** {'✅ Đã load' if ASTROX_API_KEY else '❌ Thiếu Key'}")
+            st.caption(f"• **Tavily:** {'✅ Đã load' if TAVILY_API_KEY else '❌ Thiếu Key'}")
+            st.caption(f"• **Exa:** {'✅ Đã load' if EXA_API_KEY else '❌ Thiếu Key'}")
 
         search_kw = st.text_input("🔍", key="search_kw", label_visibility="collapsed", placeholder=t["search_hist_placeholder"])
 
@@ -595,7 +629,7 @@ else:
 
             display_prompt = prompt
             if active_att and active_att["type"] == "doc":
-                display_prompt += f"\n\n*(📎 {t['attached_doc']} {active_att['name']})*"
+                display_prompt += f"\\n\\n*(📎 {t['attached_doc']} {active_att['name']})*"
 
             user_msg = {"role": "user", "content": display_prompt}
             if img_b64:
@@ -617,18 +651,18 @@ else:
                     with st.status(f"{t['search_status']} ({provider_clean})", expanded=False):
                         s_res = execute_web_search(provider_clean, prompt)
                         if s_res:
-                            s_context = f"\n\n[Dữ liệu Tìm kiếm Web từ {provider_clean}]:\n{s_res}"
+                            s_context = f"\\n\\n[Dữ liệu Tìm kiếm Web từ {provider_clean}]:\\n{s_res}"
 
                 final_prompt = prompt
                 if doc_text:
-                    final_prompt += f"\n\n[Nội dung tài liệu đính kèm]:\n{doc_text[:12000]}"
+                    final_prompt += f"\\n\\n[Nội dung tài liệu đính kèm]:\\n{doc_text[:12000]}"
 
                 response = ""
 
                 # --- XỬ LÝ GEMINI (INVISIBLE) ---
                 if "Invisible" in model_choice:
                     if not INVISIBLE_API_KEY:
-                        response = "⚠️ **Lỗi**: Chưa cấu hình `INVISIBLE_API_KEY`."
+                        response = "⚠️ **Lỗi**: Chưa cấu hình `INVISIBLE_API_KEY`. Vui lòng kiểm tra `.streamlit/secrets.toml`."
                     else:
                         try:
                             selected_gemini_model = 'gemini-1.5-pro' if "4.0" in model_choice else 'gemini-1.5-flash'
@@ -649,7 +683,7 @@ else:
                     if pil_image:
                         st.warning("⚠️ Llama trên Groq hiện chưa hỗ trợ đọc trực tiếp hình ảnh.")
                     if not ASTROX_API_KEY:
-                        response = "⚠️ **Lỗi**: Chưa cấu hình `ASTROX_API_KEY`."
+                        response = "⚠️ **Lỗi**: Chưa cấu hình `ASTROX_API_KEY`. Vui lòng kiểm tra `.streamlit/secrets.toml`."
                     else:
                         try:
                             client = Groq(api_key=ASTROX_API_KEY)
@@ -686,3 +720,9 @@ else:
             }
             save_db(all_chats, CHATS_FILE)
             st.rerun()
+'''
+
+with open("app.py", "w", encoding="utf-8") as f:
+    f.write(app_code)
+
+print("Updated app.py with robust get_secret and status checker!")
