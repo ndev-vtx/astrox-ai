@@ -10,7 +10,7 @@ import requests
 import streamlit as st
 from dotenv import load_dotenv
 
-# Thư viện AI (Dùng chuẩn OpenAI Client) & Tìm kiếm
+# Thư viện AI (Dùng chuẩn OpenAI Client cho OpenRouter) & Tìm kiếm
 from openai import OpenAI
 from duckduckgo_search import DDGS
 
@@ -21,7 +21,7 @@ import pypdf
 import docx
 
 # ==========================================
-# 1. CẤU HÌNH BAN ĐẦU & LẤY SECRET AN TOÀN NÂNG CAO
+# 1. CẤU HÌNH BAN ĐẦU & LẤY SECRET AN TOÀN
 # ==========================================
 load_dotenv()
 
@@ -50,21 +50,19 @@ def get_secret(key_name, default=""):
 
     return default
 
-# Lấy Key & Endpoint mới
-FREE_MODELS_API_KEY = get_secret("FREE_MODELS_API_KEY")
-FREE_MODELS_BASE_URL = get_secret("FREE_MODELS_BASE_URL", "https://freemodelsforall.hopto.org/v1")
+# Lấy Key & Base URL cho OpenRouter
+OPENROUTER_API_KEY = get_secret("OPENROUTER_API_KEY")
+OPENROUTER_BASE_URL = get_secret("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")
 
-# Phụ trợ (Ghi âm / Tìm kiếm nâng cao)
+# Phụ trợ (Ghi âm / Key phụ nếu có)
 ASTROX_API_KEY = get_secret("ASTROX_API_KEY")
-TAVILY_API_KEY = get_secret("TAVILY_API_KEY")
-EXA_API_KEY = get_secret("EXA_API_KEY")
 
-# Khởi tạo OpenAI Client cho API mới
-client_free = None
-if FREE_MODELS_API_KEY:
-    client_free = OpenAI(
-        api_key=FREE_MODELS_API_KEY,
-        base_url=FREE_MODELS_BASE_URL
+# Khởi tạo OpenAI Client kết nối tới OpenRouter
+client_openrouter = None
+if OPENROUTER_API_KEY:
+    client_openrouter = OpenAI(
+        api_key=OPENROUTER_API_KEY,
+        base_url=OPENROUTER_BASE_URL
     )
 
 LOGO_FILE = "astrox_logo.png"
@@ -103,13 +101,9 @@ LANG = {
         "btn_reg": "Tạo tài khoản & Bắt đầu",
         "welcome": "Xin chào, ",
         "help_today": "Hôm nay Astrox AI có thể giúp gì cho bạn?",
-        "chat_placeholder": "Nhập tin nhắn hoặc tải ảnh/file lên...",
+        "chat_placeholder": "Nhập tin nhắn hoặc hỏi bất kỳ điều gì...",
         "add_attachment": "Thêm tệp đính kèm",
-        "add_image": "🖼️ Thêm hình ảnh (JPG, PNG)",
-        "upload_file": "📄 Tải tệp tài liệu (PDF, DOCX, TXT, MD)",
         "search_status": "🔍 Đang tìm kiếm thông tin trên Web...",
-        "attached_img": "🖼️ Đã đính kèm ảnh:",
-        "attached_doc": "📄 Tài liệu đã đính kèm:",
         "settings": "Cài đặt tài khoản",
         "update_avatar": "Cập nhật ảnh đại diện",
         "back_chat": "← Quay lại trò chuyện",
@@ -139,13 +133,9 @@ LANG = {
         "btn_reg": "Create Account & Start",
         "welcome": "Hello, ",
         "help_today": "How can Astrox AI help you today?",
-        "chat_placeholder": "Ask Astrox AI anything or upload files...",
+        "chat_placeholder": "Ask Astrox AI anything...",
         "add_attachment": "Add attachment",
-        "add_image": "🖼️ Add Image (JPG, PNG)",
-        "upload_file": "📄 Upload Document (PDF, DOCX, TXT, MD)",
         "search_status": "🔍 Searching the Web...",
-        "attached_img": "🖼️ Image attached:",
-        "attached_doc": "📄 Document attached:",
         "settings": "Account Settings",
         "update_avatar": "Update Profile Picture",
         "back_chat": "← Back to chat",
@@ -167,7 +157,6 @@ if "username" not in st.session_state: st.session_state.username = ""
 if "current_chat_id" not in st.session_state: st.session_state.current_chat_id = None
 if "messages" not in st.session_state: st.session_state.messages = []
 if "show_account_page" not in st.session_state: st.session_state.show_account_page = False
-if "pending_attachment" not in st.session_state: st.session_state.pending_attachment = None
 if "lang" not in st.session_state: st.session_state.lang = "vi"
 
 t = LANG[st.session_state.lang]
@@ -214,25 +203,6 @@ def save_db(data, file_name):
 def hash_password(password):
     return hashlib.sha256(str.encode(password)).hexdigest()
 
-def get_user_search_count(username):
-    return load_db(DB_FILE).get(username, {}).get("search_count", 0)
-
-def extract_text_from_file(file_bytes, filename):
-    try:
-        ext = filename.lower().split('.')[-1]
-        bio = BytesIO(file_bytes)
-        if ext == "pdf":
-            reader = pypdf.PdfReader(bio)
-            return "\n".join([p.extract_text() for p in reader.pages if p.extract_text()])
-        elif ext == "docx":
-            doc = docx.Document(bio)
-            return "\n".join([p.text for p in doc.paragraphs if p.text])
-        elif ext in ["txt", "py", "json", "md", "csv", "html"]:
-            return bio.read().decode("utf-8", errors="ignore")
-    except Exception as e:
-        return f"[Lỗi khi đọc file: {e}]"
-    return ""
-
 def image_to_base64(image):
     buffered = BytesIO()
     image.save(buffered, format="PNG")
@@ -246,7 +216,7 @@ def base64_to_image(base64_str):
         return None
 
 # ==========================================
-# 5. TÌM KIẾM WEB & AUDIO
+# 5. TÌM KIẾM WEB (DUCKDUCKGO)
 # ==========================================
 def search_duckduckgo(query):
     results = []
@@ -254,12 +224,9 @@ def search_duckduckgo(query):
         with DDGS() as ddgs:
             for r in ddgs.text(query, max_results=4):
                 results.append(f"📌 **{r.get('title')}**\n{r.get('body')}")
-        return "\n\n".join(results) if results else "Không tìm thấy kết quả từ DuckDuckGo."
+        return "\n\n".join(results) if results else "Không tìm thấy kết quả phù hợp từ DuckDuckGo."
     except Exception as e:
         return f"Lỗi DuckDuckGo Search: {e}"
-
-def execute_web_search(provider, query):
-    return search_duckduckgo(query)
 
 # ==========================================
 # 6. GIAO DIỆN CHƯA ĐĂNG NHẬP
@@ -300,7 +267,7 @@ if not st.session_state.logged_in:
                 else:
                     users = load_db(DB_FILE)
                     if r_user not in users:
-                        users[r_user] = {"password": hash_password(r_pass), "avatar_base64": "", "search_count": 0}
+                        users[r_user] = {"password": hash_password(r_pass), "avatar_base64": ""}
                         save_db(users, DB_FILE)
                         st.session_state.logged_in = True
                         st.session_state.username = r_user
@@ -334,28 +301,26 @@ else:
         if st.button(t["new_chat"], use_container_width=True, type="primary"):
             st.session_state.current_chat_id = None
             st.session_state.messages = []
-            st.session_state.pending_attachment = None
             st.rerun()
         
         st.markdown("<br>", unsafe_allow_html=True)
         
-        # 📌 DANH SÁCH MODEL MỚI TỪ BẠN YÊU CẦU
+        # 📌 DANH SÁCH MÔ HÌNH CHUẨN OPENROUTER (KÈM CÁC BẢN MIỄN PHÍ RẤT MẠNH)
         MODEL_MAPPING = {
-            "✨ Gemini 3.1 Pro": "gemini-3.1-pro",
-            "🤖 ChatGPT 5.6": "chatgpt-5.6",
-            "⚡ DeepSeek V4 Flash": "deepseek-v4-flash",
-            "🚀 DeepSeek V4": "deepseek-v4",
-            "🔥 GPT-4o": "gpt-4o",
-            "🧠 Claude 3.5 Sonnet": "claude-3-5-sonnet"
+            "✨ Gemini 2.0 Flash (Free)": "google/gemini-2.0-flash-exp:free",
+            "🚀 DeepSeek R1 (Free)": "deepseek/deepseek-r1:free",
+            "🧠 DeepSeek V3 (Free)": "deepseek/deepseek-chat:free",
+            "🔥 Meta Llama 3.3 70B (Free)": "meta-llama/llama-3.3-70b-instruct:free",
+            "🤖 GPT-4o Mini": "openai/gpt-4o-mini",
+            "⚡ Claude 3.5 Sonnet": "anthropic/claude-3.5-sonnet"
         }
         
         model_choice = st.selectbox(t["choose_model"], list(MODEL_MAPPING.keys()))
         
         enable_search = st.toggle(f"{t['web_search']} (DuckDuckGo)", value=False)
-        search_provider = "DuckDuckGo"
 
-        with st.expander("🔑 Trạng thái API Keys", expanded=False):
-            st.caption(f"• **FreeModels API:** {'✅ Đã load' if FREE_MODELS_API_KEY else '❌ Thiếu Key'}")
+        with st.expander("🔑 Trạng thái API Key", expanded=False):
+            st.caption(f"• **OpenRouter API:** {'✅ Đã cấu hình' if OPENROUTER_API_KEY else '❌ Chưa có Key'}")
 
         search_kw = st.text_input("🔍", key="search_kw", label_visibility="collapsed", placeholder=t["search_hist_placeholder"])
 
@@ -439,15 +404,15 @@ else:
             with col_g1:
                 st.markdown(f'<div class="suggestion-card"><b>{t["idea_title"]}</b><br><span>{t["idea_desc"]}</span></div>', unsafe_allow_html=True)
                 if st.button(t["try_this"], key="p1", use_container_width=True):
-                    prompt_preset = "Gợi ý 3 kịch bản video sáng tạo."
+                    prompt_preset = "Gợi ý 3 kịch bản video ngắn thu hút người xem."
             with col_g2:
                 st.markdown(f'<div class="suggestion-card"><b>{t["code_title"]}</b><br><span>{t["code_desc"]}</span></div>', unsafe_allow_html=True)
                 if st.button(t["try_this"], key="p2", use_container_width=True):
-                    prompt_preset = "Viết script Python crawl dữ liệu web."
+                    prompt_preset = "Viết script Python crawl dữ liệu bài viết đơn giản."
             with col_g3:
                 st.markdown(f'<div class="suggestion-card"><b>{t["search_title"]}</b><br><span>{t["search_desc"]}</span></div>', unsafe_allow_html=True)
                 if st.button(t["try_this"], key="p3", use_container_width=True):
-                    prompt_preset = "Tin tức AI mới nhất tuần này là gì?"
+                    prompt_preset = "Tin tức mới nhất về trí tuệ nhân tạo tuần này?"
         
         else:
             for message in st.session_state.messages:
@@ -471,38 +436,42 @@ else:
                 s_context = ""
                 if enable_search:
                     with st.status(t['search_status'], expanded=False):
-                        s_res = execute_web_search(search_provider, prompt)
+                        s_res = search_duckduckgo(prompt)
                         if s_res:
-                            s_context = f"\n\n[Dữ liệu Tìm kiếm Web]:\n{s_res}"
+                            s_context = f"\n\n[Dữ liệu Tìm kiếm Web từ DuckDuckGo]:\n{s_res}"
 
                 final_prompt = prompt
                 response = ""
 
-                # --- GỌI API CHO MODEL ĐƯỢC CHỌN ---
-                if not FREE_MODELS_API_KEY:
-                    response = "⚠️ **Lỗi**: Chưa cấu hình `FREE_MODELS_API_KEY`. Vui lòng thêm vào `.streamlit/secrets.toml`."
+                # --- GỌI API OPENROUTER ---
+                if not OPENROUTER_API_KEY:
+                    response = "⚠️ **Lỗi**: Chưa cấu hình `OPENROUTER_API_KEY`. Vui lòng thêm vào `.streamlit/secrets.toml`."
                 else:
                     try:
-                        selected_model_id = MODEL_MAPPING.get(model_choice, "gpt-4o")
+                        selected_model_id = MODEL_MAPPING.get(model_choice, "google/gemini-2.0-flash-exp:free")
 
                         formatted_messages = [
-                            {"role": "system", "content": "You are Astrox AI, a helpful assistant."}
+                            {"role": "system", "content": "You are Astrox AI, a helpful, precise, and smart assistant."}
                         ]
                         for m in st.session_state.messages[:-1]:
                             formatted_messages.append({"role": m["role"], "content": m["content"]})
                         
                         formatted_messages.append({"role": "user", "content": final_prompt + s_context})
 
-                        completion = client_free.chat.completions.create(
+                        completion = client_openrouter.chat.completions.create(
                             model=selected_model_id,
                             messages=formatted_messages,
+                            extra_headers={
+                                "HTTP-Referer": "https://astrox.streamlit.app",
+                                "X-Title": "Astrox AI"
+                            },
                             stream=False
                         )
                         
                         response = completion.choices[0].message.content
 
                     except Exception as e:
-                        response = f"❌ **Lỗi gọi API ({model_choice})**: {e}"
+                        response = f"❌ **Lỗi gọi OpenRouter API ({model_choice})**: {e}"
 
                 st.markdown(response)
 
