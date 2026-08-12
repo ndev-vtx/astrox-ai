@@ -503,8 +503,8 @@ else:
                 
                 provider, model_id = MODEL_MAPPING.get(model_choice, ("gemini", "gemini-3.6-flash"))
 
-                # -------------------------------------------------------------
-                # 1. GỌI API GEMINI TRỰC TIẾP
+               # -------------------------------------------------------------
+                # 1. GỌI API GEMINI TRỰC TIẾP (ĐÃ SỬA LỖI METADATA ẢNH)
                 # -------------------------------------------------------------
                 if provider == "gemini":
                     if not client_gemini:
@@ -517,9 +517,18 @@ else:
                                 contents.append(types.Content(role=role, parts=[types.Part.from_text(text=m["content"])]))
                             
                             if f_type == "image":
+                                # Chuyển PIL Image sang Bytes chuẩn để tránh lỗi metadata (Creation Time)
+                                img_byte_arr = BytesIO()
+                                f_data.save(img_byte_arr, format="PNG")
+                                img_bytes = img_byte_arr.getvalue()
+                                
+                                image_part = types.Part.from_bytes(
+                                    data=img_bytes,
+                                    mime_type="image/png"
+                                )
                                 contents.append(types.Content(
                                     role="user", 
-                                    parts=[f_data, types.Part.from_text(text=final_prompt)]
+                                    parts=[image_part, types.Part.from_text(text=final_prompt)]
                                 ))
                             else:
                                 contents.append(types.Content(
@@ -538,6 +547,47 @@ else:
                         except Exception as e:
                             response = f"❌ **Lỗi gọi Astrox Gemini API**: {e}"
 
+                # -------------------------------------------------------------
+                # 2. GỌI API OPENROUTER (ĐÃ SỬA LỖI RGBA -> JPEG)
+                # -------------------------------------------------------------
+                elif provider == "openrouter":
+                    if not OPENROUTER_API_KEY:
+                        response = "⚠️ **Lỗi**: Chưa cấu hình `OPENROUTER_API_KEY`."
+                    else:
+                        try:
+                            formatted_messages = [{"role": "system", "content": SYSTEM_PROMPT}]
+                            for m in st.session_state.messages[:-1]:
+                                formatted_messages.append({"role": m["role"], "content": m["content"]})
+                            
+                            if f_type == "image":
+                                # Convert ảnh RGBA (PNG) sang RGB để tránh lỗi khi lưu thành JPEG
+                                buffered = BytesIO()
+                                img_rgb = f_data.convert("RGB")
+                                img_rgb.save(buffered, format="JPEG")
+                                img_str = base64.b64encode(buffered.getvalue()).decode()
+                                
+                                formatted_messages.append({
+                                    "role": "user",
+                                    "content": [
+                                        {"type": "text", "text": final_prompt},
+                                        {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{img_str}"}}
+                                    ]
+                                })
+                            else:
+                                formatted_messages.append({"role": "user", "content": final_prompt})
+
+                            completion = client_openrouter.chat.completions.create(
+                                model=model_id,
+                                messages=formatted_messages,
+                                extra_headers={
+                                    "HTTP-Referer": "https://astrox.streamlit.app",
+                                    "X-Title": "Astrox AI"
+                                },
+                                stream=False
+                            )
+                            response = completion.choices[0].message.content
+                        except Exception as e:
+                            response = f"❌ **Lỗi gọi OpenRouter API**: {e}"
                 # -------------------------------------------------------------
                 # 2. GỌI API OPENROUTER
                 # -------------------------------------------------------------
