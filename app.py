@@ -16,7 +16,6 @@ from duckduckgo_search import DDGS
 
 # Thư viện bổ trợ Streamlit & Đọc file
 import extra_streamlit_components as stx
-from audio_recorder_streamlit import audio_recorder
 import pypdf
 import docx
 
@@ -54,9 +53,6 @@ def get_secret(key_name, default=""):
 OPENROUTER_API_KEY = get_secret("OPENROUTER_API_KEY")
 OPENROUTER_BASE_URL = get_secret("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")
 
-# Phụ trợ (Ghi âm / Key phụ nếu có)
-ASTROX_API_KEY = get_secret("ASTROX_API_KEY")
-
 # Khởi tạo OpenAI Client kết nối tới OpenRouter
 client_openrouter = None
 if OPENROUTER_API_KEY:
@@ -87,7 +83,6 @@ LANG = {
         "new_chat": "➕ Cuộc trò chuyện mới",
         "choose_model": "⚡ Chọn mô hình AI:",
         "web_search": "🌐 Tìm kiếm Web",
-        "search_provider": "⚙️ Công cụ tìm kiếm:",
         "search_hist_placeholder": "🔍 Tìm kiếm lịch sử...",
         "chat_hist": "LỊCH SỬ TRÒ CHUYỆN",
         "no_hist": "Chưa có lịch sử chat nào.",
@@ -102,7 +97,6 @@ LANG = {
         "welcome": "Xin chào, ",
         "help_today": "Hôm nay Astrox AI có thể giúp gì cho bạn?",
         "chat_placeholder": "Nhập tin nhắn hoặc hỏi bất kỳ điều gì...",
-        "add_attachment": "Thêm tệp đính kèm",
         "search_status": "🔍 Đang tìm kiếm thông tin trên Web...",
         "settings": "Cài đặt tài khoản",
         "update_avatar": "Cập nhật ảnh đại diện",
@@ -119,7 +113,6 @@ LANG = {
         "new_chat": "➕ New Chat",
         "choose_model": "⚡ Choose AI Model:",
         "web_search": "🌐 Web Search",
-        "search_provider": "⚙️ Search Provider:",
         "search_hist_placeholder": "🔍 Search history...",
         "chat_hist": "CHAT HISTORY",
         "no_hist": "No chat history yet.",
@@ -134,7 +127,6 @@ LANG = {
         "welcome": "Hello, ",
         "help_today": "How can Astrox AI help you today?",
         "chat_placeholder": "Ask Astrox AI anything...",
-        "add_attachment": "Add attachment",
         "search_status": "🔍 Searching the Web...",
         "settings": "Account Settings",
         "update_avatar": "Update Profile Picture",
@@ -305,13 +297,11 @@ else:
         
         st.markdown("<br>", unsafe_allow_html=True)
         
-        # 📌 DANH SÁCH MÔ HÌNH CHUẨN OPENROUTER (KÈM CÁC BẢN MIỄN PHÍ RẤT MẠNH)
-       # Danh sách Model ID mới nhất đã cập nhật cho OpenRouter
-       # 1. Danh sách mô hình AI duy nhất (DeepSeek V3 & GPT-4o Mini)
-MODEL_MAPPING = {
-    "🧠 nknbel V3": "deepseek/deepseek-chat",
-    "Orchesta 4": "openai/gpt-4o-mini"
-}
+        # 📌 CHỈ GIỮ LẠI 2 MÔ HÌNH: DEEPSEEK V3 & GPT-4O MINI
+        MODEL_MAPPING = {
+            "🧠 nknbel V3": "deepseek/deepseek-chat",
+            "Orchesta 4": "openai/gpt-4o-mini"
+        }
         
         model_choice = st.selectbox(t["choose_model"], list(MODEL_MAPPING.keys()))
         
@@ -442,13 +432,13 @@ MODEL_MAPPING = {
                 response = ""
 
                 # --- GỌI API OPENROUTER ---
-               # --- GỌI API OPENROUTER ---
                 if not OPENROUTER_API_KEY:
-                    response = "⚠️ **Lỗi**: Chưa cấu hình `OPENROUTER_API_KEY`."
+                    response = "⚠️ **Lỗi**: Chưa cấu hình `OPENROUTER_API_KEY`. Vui lòng thêm vào `.streamlit/secrets.toml`."
                 else:
                     try:
                         selected_model_id = MODEL_MAPPING.get(model_choice, "deepseek/deepseek-chat")
 
+                        # 📌 PROMPT NÂNG CAO ĐỊNH DANH NGƯỜI SÁNG LẬP
                         SYSTEM_PROMPT = (
                             "You are Astrox AI, an intelligent, helpful, and polite AI assistant. "
                             "Whenever anyone asks who created, built, founded, or developed you (e.g., 'ai tạo ra bạn', 'ai là người sáng lập', 'who created you', 'who is your founder'), "
