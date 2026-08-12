@@ -306,11 +306,14 @@ else:
         st.markdown("<br>", unsafe_allow_html=True)
         
         # 📌 DANH SÁCH MÔ HÌNH CHUẨN OPENROUTER (KÈM CÁC BẢN MIỄN PHÍ RẤT MẠNH)
+       # Danh sách Model ID mới nhất đã cập nhật cho OpenRouter
         MODEL_MAPPING = {
-            "✨ Gemini 2.0 Flash (Free)": "google/gemini-2.0-flash-exp:free",
-            "🚀 DeepSeek R1 (Free)": "deepseek/deepseek-r1:free",
-            "🧠 DeepSeek V3 (Free)": "deepseek/deepseek-chat:free",
+            "🚀 DeepSeek R1": "deepseek/deepseek-r1",
+            "🧠 DeepSeek V3": "deepseek/deepseek-chat",
+            "✨ Gemini 2.0 Flash": "google/gemini-2.0-flash-001",
+            "⚡ Gemini 2.0 Flash Lite (Free)": "google/gemini-2.0-flash-lite-001",
             "🔥 Meta Llama 3.3 70B (Free)": "meta-llama/llama-3.3-70b-instruct:free",
+            "💻 Qwen 2.5 Coder 32B (Free)": "qwen/qwen-2.5-coder-32b-instruct:free",
             "🤖 GPT-4o Mini": "openai/gpt-4o-mini",
             "⚡ Claude 3.5 Sonnet": "anthropic/claude-3.5-sonnet"
         }
