@@ -307,16 +307,11 @@ else:
         
         # 📌 DANH SÁCH MÔ HÌNH CHUẨN OPENROUTER (KÈM CÁC BẢN MIỄN PHÍ RẤT MẠNH)
        # Danh sách Model ID mới nhất đã cập nhật cho OpenRouter
-        MODEL_MAPPING = {
-            "🚀 DeepSeek R1": "deepseek/deepseek-r1",
-            "🧠 DeepSeek V3": "deepseek/deepseek-chat",
-            "✨ Gemini 2.0 Flash": "google/gemini-2.0-flash-001",
-            "⚡ Gemini 2.0 Flash Lite (Free)": "google/gemini-2.0-flash-lite-001",
-            "🔥 Meta Llama 3.3 70B (Free)": "meta-llama/llama-3.3-70b-instruct:free",
-            "💻 Qwen 2.5 Coder 32B (Free)": "qwen/qwen-2.5-coder-32b-instruct:free",
-            "🤖 GPT-4o Mini": "openai/gpt-4o-mini",
-            "⚡ Claude 3.5 Sonnet": "anthropic/claude-3.5-sonnet"
-        }
+       # 1. Danh sách mô hình AI duy nhất (DeepSeek V3 & GPT-4o Mini)
+MODEL_MAPPING = {
+    "🧠 nknbel V3": "deepseek/deepseek-chat",
+    "Orchesta 4": "openai/gpt-4o-mini"
+}
         
         model_choice = st.selectbox(t["choose_model"], list(MODEL_MAPPING.keys()))
         
@@ -447,14 +442,22 @@ else:
                 response = ""
 
                 # --- GỌI API OPENROUTER ---
+               # --- GỌI API OPENROUTER ---
                 if not OPENROUTER_API_KEY:
-                    response = "⚠️ **Lỗi**: Chưa cấu hình `OPENROUTER_API_KEY`. Vui lòng thêm vào `.streamlit/secrets.toml`."
+                    response = "⚠️ **Lỗi**: Chưa cấu hình `OPENROUTER_API_KEY`."
                 else:
                     try:
-                        selected_model_id = MODEL_MAPPING.get(model_choice, "google/gemini-2.0-flash-exp:free")
+                        selected_model_id = MODEL_MAPPING.get(model_choice, "deepseek/deepseek-chat")
+
+                        SYSTEM_PROMPT = (
+                            "You are Astrox AI, an intelligent, helpful, and polite AI assistant. "
+                            "Whenever anyone asks who created, built, founded, or developed you (e.g., 'ai tạo ra bạn', 'ai là người sáng lập', 'who created you', 'who is your founder'), "
+                            "you MUST always answer clearly that Nguyễn Khôi Nguyên is your creator and founder. "
+                            "Always respond in the same language as the user's message."
+                        )
 
                         formatted_messages = [
-                            {"role": "system", "content": "You are Astrox AI, a helpful, precise, and smart assistant."}
+                            {"role": "system", "content": SYSTEM_PROMPT}
                         ]
                         for m in st.session_state.messages[:-1]:
                             formatted_messages.append({"role": m["role"], "content": m["content"]})
