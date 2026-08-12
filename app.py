@@ -5,19 +5,22 @@ import base64
 import uuid
 from io import BytesIO
 from PIL import Image
-import requests
 
 import streamlit as st
 from dotenv import load_dotenv
 
-# Thư viện AI (Dùng chuẩn OpenAI Client cho OpenRouter) & Tìm kiếm
+# Thư viện AI (Google GenAI chính hãng & OpenAI Client cho OpenRouter)
+from google import genai
+from google.genai import types
 from openai import OpenAI
 from duckduckgo_search import DDGS
 
-# Thư viện bổ trợ Streamlit & Đọc file
-import extra_streamlit_components as stx
+# Thư viện đọc File Tài liệu
 import pypdf
 import docx
+
+# Thư viện bổ trợ Streamlit
+import extra_streamlit_components as stx
 
 # ==========================================
 # 1. CẤU HÌNH BAN ĐẦU & LẤY SECRET AN TOÀN
@@ -49,11 +52,18 @@ def get_secret(key_name, default=""):
 
     return default
 
-# Lấy Key & Base URL cho OpenRouter
+# --- Khởi tạo Clients ---
+ASTROX_API_KEY = get_secret("ASTROX_API_KEY")
 OPENROUTER_API_KEY = get_secret("OPENROUTER_API_KEY")
 OPENROUTER_BASE_URL = get_secret("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")
 
-# Khởi tạo OpenAI Client kết nối tới OpenRouter
+client_gemini = None
+if ASTROX_API_KEY:
+    try:
+        client_gemini = genai.Client(api_key=ASTROX_API_KEY)
+    except Exception as e:
+        st.error(f"Lỗi khởi tạo Astrox Gemini Client: {e}")
+
 client_openrouter = None
 if OPENROUTER_API_KEY:
     client_openrouter = OpenAI(
@@ -70,13 +80,46 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-try:
-    cookie_manager = stx.CookieManager(key="astrox_cookie_mgr")
-except Exception:
-    cookie_manager = None
+# ==========================================
+# 2. HÀM XỬ LÝ FILE & ẢNH NÂNG CAO
+# ==========================================
+def process_uploaded_file(uploaded_file):
+    if uploaded_file is None:
+        return None, None
+    
+    file_type = uploaded_file.type
+    file_name = uploaded_file.name.lower()
+    
+    try:
+        # 1. Xử lý Ảnh (Vision / OCR)
+        if "image" in file_type or file_name.endswith(('.png', '.jpg', '.jpeg', '.webp')):
+            img = Image.open(uploaded_file)
+            return "image", img
+            
+        # 2. Xử lý File PDF
+        elif file_name.endswith('.pdf'):
+            pdf_reader = pypdf.PdfReader(BytesIO(uploaded_file.getvalue()))
+            text = "\n".join([page.extract_text() or "" for page in pdf_reader.pages])
+            return "text", text
+            
+        # 3. Xử lý File Word (.docx)
+        elif file_name.endswith('.docx'):
+            doc = docx.Document(BytesIO(uploaded_file.getvalue()))
+            text = "\n".join([p.text for p in doc.paragraphs if p.text])
+            return "text", text
+            
+        # 4. Xử lý File TXT
+        elif file_name.endswith('.txt'):
+            text = uploaded_file.getvalue().decode("utf-8", errors="ignore")
+            return "text", text
+
+    except Exception as e:
+        return "error", f"Lỗi đọc tệp {uploaded_file.name}: {e}"
+
+    return None, None
 
 # ==========================================
-# 2. TỪ ĐIỂN ĐA NGÔN NGỮ (i18n)
+# 3. TỪ ĐIỂN ĐA NGÔN NGỮ (i18n)
 # ==========================================
 LANG = {
     "vi": {
@@ -142,7 +185,7 @@ LANG = {
 }
 
 # ==========================================
-# 3. KHỞI TẠO SESSION STATE & CSS
+# 4. KHỞI TẠO SESSION STATE & CSS
 # ==========================================
 if "logged_in" not in st.session_state: st.session_state.logged_in = False
 if "username" not in st.session_state: st.session_state.username = ""
@@ -171,7 +214,7 @@ def inject_custom_css():
 inject_custom_css()
 
 # ==========================================
-# 4. HÀM DATABASE JSON & FILE
+# 5. HÀM DATABASE JSON & TÌM KIẾM
 # ==========================================
 DB_FILE = "users_db.json"
 CHATS_FILE = "chats_db.json"
@@ -207,9 +250,6 @@ def base64_to_image(base64_str):
     except Exception:
         return None
 
-# ==========================================
-# 5. TÌM KIẾM WEB (DUCKDUCKGO)
-# ==========================================
 def search_duckduckgo(query):
     results = []
     try:
@@ -219,6 +259,14 @@ def search_duckduckgo(query):
         return "\n\n".join(results) if results else "Không tìm thấy kết quả phù hợp từ DuckDuckGo."
     except Exception as e:
         return f"Lỗi DuckDuckGo Search: {e}"
+
+# SYSTEM PROMPT ĐỊNH DANH SÁNG LẬP VIÊN
+SYSTEM_PROMPT = (
+    "You are Astrox AI, an intelligent, helpful, and polite AI assistant. "
+    "Whenever anyone asks who created, built, founded, or developed you (e.g., 'ai tạo ra bạn', 'ai là người sáng lập', 'who created you', 'who is your founder'), "
+    "you MUST always answer clearly that Nguyễn Khôi Nguyên is your creator and founder. "
+    "Always respond in the same language as the user's message."
+)
 
 # ==========================================
 # 6. GIAO DIỆN CHƯA ĐĂNG NHẬP
@@ -297,10 +345,10 @@ else:
         
         st.markdown("<br>", unsafe_allow_html=True)
         
-        # 📌 CHỈ GIỮ LẠI 2 MÔ HÌNH: DEEPSEEK V3 & GPT-4O MINI
         MODEL_MAPPING = {
-            "🧠 nknbel V3": "deepseek/deepseek-chat",
-            "Orchesta 4": "openai/gpt-4o-mini"
+            "⚡ Okaylastic 2.0 ": ("gemini", "gemini-3.6-flash"),
+            "🚀 NKNBel V3 ": ("openrouter", "deepseek/deepseek-chat"),
+            "Orchesta 4.0 ": ("openrouter", "openai/gpt-4o-mini")
         }
         
         model_choice = st.selectbox(t["choose_model"], list(MODEL_MAPPING.keys()))
@@ -308,7 +356,8 @@ else:
         enable_search = st.toggle(f"{t['web_search']} (DuckDuckGo)", value=False)
 
         with st.expander("🔑 Trạng thái API Key", expanded=False):
-            st.caption(f"• **OpenRouter API:** {'✅ Đã cấu hình' if OPENROUTER_API_KEY else '❌ Chưa có Key'}")
+            st.caption(f"• **Astrox Key:** {'✅ Đã có Key' if ASTROX_API_KEY else '❌ Chưa có Key'}")
+            st.caption(f"• **OpenRouter Key:** {'✅ Đã có Key' if OPENROUTER_API_KEY else '❌ Chưa có Key'}")
 
         search_kw = st.text_input("🔍", key="search_kw", label_visibility="collapsed", placeholder=t["search_hist_placeholder"])
 
@@ -407,18 +456,39 @@ else:
                 with st.chat_message(message["role"]):
                     st.markdown(message["content"])
 
+        # 📌 KHU VỰC NÚT "📁 TẢI TỆP LÊN"
+        with st.expander("📁 Tải tệp lên (Quét ảnh / Đọc file PDF, Docx, TXT)", expanded=False):
+            uploaded_file = st.file_uploader(
+                "Chọn tệp từ máy tính:",
+                type=["png", "jpg", "jpeg", "webp", "pdf", "docx", "txt"],
+                key="file_uploader_widget"
+            )
+
         prompt_input = st.chat_input(t["chat_placeholder"])
         prompt = prompt_input or prompt_preset
 
         if prompt:
-            user_msg = {"role": "user", "content": prompt}
-            st.session_state.messages.append(user_msg)
+            f_type, f_data = process_uploaded_file(uploaded_file)
+            
+            file_context = ""
+            if f_type == "text":
+                file_context = f"\n\n[Nội dung tệp đính kèm '{uploaded_file.name}']:\n{f_data}\n"
+            elif f_type == "error":
+                st.error(f_data)
+
+            display_user_msg = prompt
+            if uploaded_file:
+                display_user_msg = f"📎 **[Đã đính kèm tệp: {uploaded_file.name}]**\n\n" + prompt
+
+            st.session_state.messages.append({"role": "user", "content": display_user_msg})
             
             if not st.session_state.current_chat_id:
                 st.session_state.current_chat_id = str(uuid.uuid4())
 
             with st.chat_message("user"):
-                st.markdown(prompt)
+                if f_type == "image":
+                    st.image(f_data, width=300)
+                st.markdown(display_user_msg)
 
             with st.chat_message("assistant"):
                 s_context = ""
@@ -428,46 +498,85 @@ else:
                         if s_res:
                             s_context = f"\n\n[Dữ liệu Tìm kiếm Web từ DuckDuckGo]:\n{s_res}"
 
-                final_prompt = prompt
+                final_prompt = prompt + file_context + s_context
                 response = ""
+                
+                provider, model_id = MODEL_MAPPING.get(model_choice, ("gemini", "gemini-3.6-flash"))
 
-                # --- GỌI API OPENROUTER ---
-                if not OPENROUTER_API_KEY:
-                    response = "⚠️ **Lỗi**: Chưa cấu hình `OPENROUTER_API_KEY`. Vui lòng thêm vào `.streamlit/secrets.toml`."
-                else:
-                    try:
-                        selected_model_id = MODEL_MAPPING.get(model_choice, "deepseek/deepseek-chat")
+                # -------------------------------------------------------------
+                # 1. GỌI API GEMINI TRỰC TIẾP
+                # -------------------------------------------------------------
+                if provider == "gemini":
+                    if not client_gemini:
+                        response = "⚠️ **Lỗi**: Chưa cấu hình `ASTROX_API_KEY`."
+                    else:
+                        try:
+                            contents = []
+                            for m in st.session_state.messages[:-1]:
+                                role = "user" if m["role"] == "user" else "model"
+                                contents.append(types.Content(role=role, parts=[types.Part.from_text(text=m["content"])]))
+                            
+                            if f_type == "image":
+                                contents.append(types.Content(
+                                    role="user", 
+                                    parts=[f_data, types.Part.from_text(text=final_prompt)]
+                                ))
+                            else:
+                                contents.append(types.Content(
+                                    role="user", 
+                                    parts=[types.Part.from_text(text=final_prompt)]
+                                ))
 
-                        # 📌 PROMPT NÂNG CAO ĐỊNH DANH NGƯỜI SÁNG LẬP
-                        SYSTEM_PROMPT = (
-                            "You are Astrox AI, an intelligent, helpful, and polite AI assistant. "
-                            "Whenever anyone asks who created, built, founded, or developed you (e.g., 'ai tạo ra bạn', 'ai là người sáng lập', 'who created you', 'who is your founder'), "
-                            "you MUST always answer clearly that Nguyễn Khôi Nguyên is your creator and founder. "
-                            "Always respond in the same language as the user's message."
-                        )
+                            res = client_gemini.models.generate_content(
+                                model=model_id,
+                                contents=contents,
+                                config=types.GenerateContentConfig(
+                                    system_instruction=SYSTEM_PROMPT
+                                )
+                            )
+                            response = res.text
+                        except Exception as e:
+                            response = f"❌ **Lỗi gọi Astrox Gemini API**: {e}"
 
-                        formatted_messages = [
-                            {"role": "system", "content": SYSTEM_PROMPT}
-                        ]
-                        for m in st.session_state.messages[:-1]:
-                            formatted_messages.append({"role": m["role"], "content": m["content"]})
-                        
-                        formatted_messages.append({"role": "user", "content": final_prompt + s_context})
+                # -------------------------------------------------------------
+                # 2. GỌI API OPENROUTER
+                # -------------------------------------------------------------
+                elif provider == "openrouter":
+                    if not OPENROUTER_API_KEY:
+                        response = "⚠️ **Lỗi**: Chưa cấu hình `OPENROUTER_API_KEY`."
+                    else:
+                        try:
+                            formatted_messages = [{"role": "system", "content": SYSTEM_PROMPT}]
+                            for m in st.session_state.messages[:-1]:
+                                formatted_messages.append({"role": m["role"], "content": m["content"]})
+                            
+                            if f_type == "image":
+                                buffered = BytesIO()
+                                f_data.save(buffered, format="JPEG")
+                                img_str = base64.b64encode(buffered.getvalue()).decode()
+                                
+                                formatted_messages.append({
+                                    "role": "user",
+                                    "content": [
+                                        {"type": "text", "text": final_prompt},
+                                        {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{img_str}"}}
+                                    ]
+                                })
+                            else:
+                                formatted_messages.append({"role": "user", "content": final_prompt})
 
-                        completion = client_openrouter.chat.completions.create(
-                            model=selected_model_id,
-                            messages=formatted_messages,
-                            extra_headers={
-                                "HTTP-Referer": "https://astrox.streamlit.app",
-                                "X-Title": "Astrox AI"
-                            },
-                            stream=False
-                        )
-                        
-                        response = completion.choices[0].message.content
-
-                    except Exception as e:
-                        response = f"❌ **Lỗi gọi OpenRouter API ({model_choice})**: {e}"
+                            completion = client_openrouter.chat.completions.create(
+                                model=model_id,
+                                messages=formatted_messages,
+                                extra_headers={
+                                    "HTTP-Referer": "https://astrox.streamlit.app",
+                                    "X-Title": "Astrox AI"
+                                },
+                                stream=False
+                            )
+                            response = completion.choices[0].message.content
+                        except Exception as e:
+                            response = f"❌ **Lỗi gọi OpenRouter API**: {e}"
 
                 st.markdown(response)
 
