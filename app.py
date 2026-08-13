@@ -19,9 +19,6 @@ from duckduckgo_search import DDGS
 import pypdf
 import docx
 
-# Thư viện bổ trợ Streamlit
-import extra_streamlit_components as stx
-
 # ==========================================
 # 1. CẤU HÌNH BAN ĐẦU & LẤY SECRET AN TOÀN
 # ==========================================
@@ -150,7 +147,9 @@ LANG = {
         "code_desc": "Viết code Python, HTML hoặc sửa lỗi lập trình",
         "search_title": "🌐 Tìm kiếm thông tin",
         "search_desc": "Tin tức mới nhất về công nghệ và AI hiện nay",
-        "try_this": "Thử gợi ý này"
+        "try_this": "Thử gợi ý này",
+        "upload_title": "📁 Tải tệp lên (Quét ảnh / Đọc file PDF, Docx, TXT)",
+        "upload_label": "Chọn tệp từ máy tính:"
     },
     "en": {
         "new_chat": "➕ New Chat",
@@ -180,7 +179,9 @@ LANG = {
         "code_desc": "Write Python, HTML or fix coding bugs",
         "search_title": "🌐 Search Information",
         "search_desc": "Latest news on tech and AI trends",
-        "try_this": "Try this"
+        "try_this": "Try this",
+        "upload_title": "📁 Upload File (Scan Image / Read PDF, Docx, TXT)",
+        "upload_label": "Choose a file from your computer:"
     }
 }
 
@@ -199,14 +200,59 @@ t = LANG[st.session_state.lang]
 def inject_custom_css():
     css = """
     <style>
-        .stApp, [data-testid="stAppViewContainer"] { background-color: #ffffff !important; color: #1f2328 !important; }
-        [data-testid="stSidebar"] { background-color: #f6f8fa !important; border-right: 1px solid #d0d7de !important; }
-        .suggestion-card { background-color: #f6f8fa !important; border: 1px solid #d0d7de !important; color: #1f2328 !important; border-radius: 12px; padding: 16px; margin-bottom: 12px; min-height: 100px;}
+        /* Ép hệ thống dùng giao diện Sáng (Chống Dark Mode Android) */
+        :root {
+            color-scheme: light !important;
+        }
+
+        /* Khóa màu nền trắng toàn bộ ứng dụng */
+        .stApp, [data-testid="stAppViewContainer"], [data-testid="stHeader"] { 
+            background-color: #ffffff !important; 
+            color: #1f2328 !important; 
+        }
+        
+        [data-testid="stSidebar"] { 
+            background-color: #f6f8fa !important; 
+            border-right: 1px solid #d0d7de !important; 
+        }
+
+        /* Khóa màu nền cho Selectbox, Chat Input và Input Text */
+        div[data-baseweb="select"] > div, 
+        .stTextInput input, 
+        [data-testid="stChatInput"] textarea,
+        [data-testid="stChatInput"] {
+            background-color: #ffffff !important;
+            color: #1f2328 !important;
+            border-color: #d0d7de !important;
+        }
+
+        /* Nút bấm trắng đồng nhất */
+        .stButton > button {
+            background-color: #ffffff !important;
+            color: #1f2328 !important;
+            border: 1px solid #d0d7de !important;
+        }
+
+        .suggestion-card { 
+            background-color: #f6f8fa !important; 
+            border: 1px solid #d0d7de !important; 
+            color: #1f2328 !important; 
+            border-radius: 12px; 
+            padding: 16px; 
+            margin-bottom: 12px; 
+            min-height: 100px;
+        }
+        
         .suggestion-card span { color: #57606a !important; font-size: 0.9em; }
-        .stChatInputContainer { border-radius: 20px !important; border: 1px solid #d0d7de !important; }
         p, h1, h2, h3, h4, h5, h6, span, label { color: #1f2328 !important; }
         [data-testid="stBottomBlockContainer"] { padding-bottom: 12px !important; }
         [data-testid="stSidebarNav"] { display: none; }
+
+        /* Font Emoji Google hỗ trợ PC tốt hơn */
+        @import url('https://fonts.googleapis.com/css2?family=Noto+Color+Emoji&display=swap');
+        body, button, input, select, textarea {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Noto Color Emoji", sans-serif !important;
+        }
     </style>
     """
     st.markdown(css, unsafe_allow_html=True)
@@ -256,9 +302,9 @@ def search_duckduckgo(query):
         with DDGS() as ddgs:
             for r in ddgs.text(query, max_results=4):
                 results.append(f"📌 **{r.get('title')}**\n{r.get('body')}")
-        return "\n\n".join(results) if results else "Không tìm thấy kết quả phù hợp từ DuckDuckGo."
+        return "\n\n".join(results) if results else "Không tìm thấy kết quả phù hợp từ NKN Search."
     except Exception as e:
-        return f"Lỗi DuckDuckGo Search: {e}"
+        return f"Lỗi NKN Search: {e}"
 
 # SYSTEM PROMPT ĐỊNH DANH SÁNG LẬP VIÊN
 SYSTEM_PROMPT = (
@@ -357,7 +403,7 @@ else:
 
         with st.expander("🔑 Trạng thái API Key", expanded=False):
             st.caption(f"• **Astrox Key:** {'✅ Đã có Key' if ASTROX_API_KEY else '❌ Chưa có Key'}")
-            st.caption(f"• **OpenRouter Key:** {'✅ Đã có Key' if OPENROUTER_API_KEY else '❌ Chưa có Key'}")
+            st.caption(f"• **NKN Key:** {'✅ Đã có Key' if OPENROUTER_API_KEY else '❌ Chưa có Key'}")
 
         search_kw = st.text_input("🔍", key="search_kw", label_visibility="collapsed", placeholder=t["search_hist_placeholder"])
 
@@ -441,25 +487,25 @@ else:
             with col_g1:
                 st.markdown(f'<div class="suggestion-card"><b>{t["idea_title"]}</b><br><span>{t["idea_desc"]}</span></div>', unsafe_allow_html=True)
                 if st.button(t["try_this"], key="p1", use_container_width=True):
-                    prompt_preset = "Gợi ý 3 kịch bản video ngắn thu hút người xem."
+                    prompt_preset = "Gợi ý 3 kịch bản video ngắn thu hút người xem." if st.session_state.lang == "vi" else "Suggest 3 engaging short video scripts."
             with col_g2:
                 st.markdown(f'<div class="suggestion-card"><b>{t["code_title"]}</b><br><span>{t["code_desc"]}</span></div>', unsafe_allow_html=True)
                 if st.button(t["try_this"], key="p2", use_container_width=True):
-                    prompt_preset = "Viết script Python crawl dữ liệu bài viết đơn giản."
+                    prompt_preset = "Viết script Python crawl dữ liệu bài viết đơn giản." if st.session_state.lang == "vi" else "Write a simple Python script to crawl article data."
             with col_g3:
                 st.markdown(f'<div class="suggestion-card"><b>{t["search_title"]}</b><br><span>{t["search_desc"]}</span></div>', unsafe_allow_html=True)
                 if st.button(t["try_this"], key="p3", use_container_width=True):
-                    prompt_preset = "Tin tức mới nhất về trí tuệ nhân tạo tuần này?"
+                    prompt_preset = "Tin tức mới nhất về trí tuệ nhân tạo tuần này?" if st.session_state.lang == "vi" else "Latest news on artificial intelligence this week?"
         
         else:
             for message in st.session_state.messages:
                 with st.chat_message(message["role"]):
                     st.markdown(message["content"])
 
-        # 📌 KHU VỰC NÚT "📁 TẢI TỆP LÊN"
-        with st.expander("📁 Tải tệp lên (Quét ảnh / Đọc file PDF, Docx, TXT)", expanded=False):
+        # 📌 KHU VỰC NÚT "📁 TẢI TỆP LÊN" (Đã kết nối Đa Ngôn Ngữ)
+        with st.expander(t["upload_title"], expanded=False):
             uploaded_file = st.file_uploader(
-                "Chọn tệp từ máy tính:",
+                t["upload_label"],
                 type=["png", "jpg", "jpeg", "webp", "pdf", "docx", "txt"],
                 key="file_uploader_widget"
             )
@@ -478,7 +524,7 @@ else:
 
             display_user_msg = prompt
             if uploaded_file:
-                display_user_msg = f"📎 **[Đã đính kèm tệp: {uploaded_file.name}]**\n\n" + prompt
+                display_user_msg = f"📎 **[{'Đã đính kèm tệp' if st.session_state.lang == 'vi' else 'Attached file'}: {uploaded_file.name}]**\n\n" + prompt
 
             st.session_state.messages.append({"role": "user", "content": display_user_msg})
             
@@ -496,15 +542,15 @@ else:
                     with st.status(t['search_status'], expanded=False):
                         s_res = search_duckduckgo(prompt)
                         if s_res:
-                            s_context = f"\n\n[Dữ liệu Tìm kiếm Web từ DuckDuckGo]:\n{s_res}"
+                            s_context = f"\n\n[Dữ liệu Tìm kiếm Web từ nknsearch]:\n{s_res}"
 
                 final_prompt = prompt + file_context + s_context
                 response = ""
                 
                 provider, model_id = MODEL_MAPPING.get(model_choice, ("gemini", "gemini-3.6-flash"))
 
-               # -------------------------------------------------------------
-                # 1. GỌI API GEMINI TRỰC TIẾP (ĐÃ SỬA LỖI METADATA ẢNH)
+                # -------------------------------------------------------------
+                # 1. GỌI API GEMINI TRỰC TIẾP (Đã fix lỗi metadata ảnh)
                 # -------------------------------------------------------------
                 if provider == "gemini":
                     if not client_gemini:
@@ -517,7 +563,6 @@ else:
                                 contents.append(types.Content(role=role, parts=[types.Part.from_text(text=m["content"])]))
                             
                             if f_type == "image":
-                                # Chuyển PIL Image sang Bytes chuẩn để tránh lỗi metadata (Creation Time)
                                 img_byte_arr = BytesIO()
                                 f_data.save(img_byte_arr, format="PNG")
                                 img_bytes = img_byte_arr.getvalue()
@@ -548,7 +593,7 @@ else:
                             response = f"❌ **Lỗi gọi Astrox Gemini API**: {e}"
 
                 # -------------------------------------------------------------
-                # 2. GỌI API OPENROUTER (ĐÃ SỬA LỖI RGBA -> JPEG)
+                # 2. GỌI API OPENROUTER (Đã fix lỗi RGBA -> JPEG)
                 # -------------------------------------------------------------
                 elif provider == "openrouter":
                     if not OPENROUTER_API_KEY:
@@ -560,49 +605,9 @@ else:
                                 formatted_messages.append({"role": m["role"], "content": m["content"]})
                             
                             if f_type == "image":
-                                # Convert ảnh RGBA (PNG) sang RGB để tránh lỗi khi lưu thành JPEG
                                 buffered = BytesIO()
                                 img_rgb = f_data.convert("RGB")
                                 img_rgb.save(buffered, format="JPEG")
-                                img_str = base64.b64encode(buffered.getvalue()).decode()
-                                
-                                formatted_messages.append({
-                                    "role": "user",
-                                    "content": [
-                                        {"type": "text", "text": final_prompt},
-                                        {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{img_str}"}}
-                                    ]
-                                })
-                            else:
-                                formatted_messages.append({"role": "user", "content": final_prompt})
-
-                            completion = client_openrouter.chat.completions.create(
-                                model=model_id,
-                                messages=formatted_messages,
-                                extra_headers={
-                                    "HTTP-Referer": "https://astrox.streamlit.app",
-                                    "X-Title": "Astrox AI"
-                                },
-                                stream=False
-                            )
-                            response = completion.choices[0].message.content
-                        except Exception as e:
-                            response = f"❌ **Lỗi gọi OpenRouter API**: {e}"
-                # -------------------------------------------------------------
-                # 2. GỌI API OPENROUTER
-                # -------------------------------------------------------------
-                elif provider == "openrouter":
-                    if not OPENROUTER_API_KEY:
-                        response = "⚠️ **Lỗi**: Chưa cấu hình `OPENROUTER_API_KEY`."
-                    else:
-                        try:
-                            formatted_messages = [{"role": "system", "content": SYSTEM_PROMPT}]
-                            for m in st.session_state.messages[:-1]:
-                                formatted_messages.append({"role": m["role"], "content": m["content"]})
-                            
-                            if f_type == "image":
-                                buffered = BytesIO()
-                                f_data.save(buffered, format="JPEG")
                                 img_str = base64.b64encode(buffered.getvalue()).decode()
                                 
                                 formatted_messages.append({
