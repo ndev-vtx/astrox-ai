@@ -3,24 +3,23 @@ import json
 import hashlib
 import base64
 import uuid
+import requests
 from io import BytesIO
 from PIL import Image
 
 import streamlit as st
 from dotenv import load_dotenv
 
-# Thư viện AI (Google GenAI chính hãng & OpenAI Client cho OpenRouter)
 from google import genai
 from google.genai import types
 from openai import OpenAI
 from duckduckgo_search import DDGS
 
-# Thư viện đọc File Tài liệu
 import pypdf
 import docx
 
 # ==========================================
-# 1. CẤU HÌNH BAN ĐẦU & LẤY SECRET AN TOÀN
+# 1. CẤU HÌNH BAN ĐẦU & LẤY SECRETS AN TOÀN
 # ==========================================
 load_dotenv()
 
@@ -49,79 +48,68 @@ def get_secret(key_name, default=""):
 
     return default
 
-# --- Khởi tạo Clients ---
+# --- Khởi tạo Các API Clients ---
 ASTROX_API_KEY = get_secret("ASTROX_API_KEY")
 OPENROUTER_API_KEY = get_secret("OPENROUTER_API_KEY")
 OPENROUTER_BASE_URL = get_secret("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")
+CEREBRAS_API_KEY = get_secret("CEREBRAS_API_KEY")
+CLOUDFLARE_API_KEY = get_secret("CLOUDFLARE_API_KEY")
+CLOUDFLARE_ACCOUNT_ID = get_secret("CLOUDFLARE_ACCOUNT_ID")
 
+# 1. Gemini Client (Đã sửa đổi cho SDK mới)
 client_gemini = None
 if ASTROX_API_KEY:
     try:
         client_gemini = genai.Client(api_key=ASTROX_API_KEY)
     except Exception as e:
-        st.error(f"Lỗi khởi tạo Astrox Gemini Client: {e}")
+        st.error(f"Lỗi Gemini Client: {e}")
 
+# 2. OpenRouter Client (Dành cho NKN Intelligent)
 client_openrouter = None
 if OPENROUTER_API_KEY:
-    client_openrouter = OpenAI(
-        api_key=OPENROUTER_API_KEY,
-        base_url=OPENROUTER_BASE_URL
-    )
+    client_openrouter = OpenAI(api_key=OPENROUTER_API_KEY, base_url=OPENROUTER_BASE_URL)
+
+# 3. Cerebras Client (Dành cho NKN Fast Speed)
+client_cerebras = None
+if CEREBRAS_API_KEY:
+    client_cerebras = OpenAI(api_key=CEREBRAS_API_KEY, base_url="https://api.cerebras.ai/v1")
 
 LOGO_FILE = "astrox_logo.png"
 
 st.set_page_config(
-    page_title="Astrox AI",
+    page_title="Astrox AI - Powered by NKN",
     page_icon=LOGO_FILE if os.path.exists(LOGO_FILE) else "✨",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
 # ==========================================
-# 2. HÀM XỬ LÝ FILE & ẢNH NÂNG CAO
+# 2. XỬ LÝ FILE & TỪ ĐIỂN ĐA NGÔN NGỮ
 # ==========================================
 def process_uploaded_file(uploaded_file):
-    if uploaded_file is None:
-        return None, None
-    
+    if uploaded_file is None: return None, None
     file_type = uploaded_file.type
     file_name = uploaded_file.name.lower()
     
     try:
-        # 1. Xử lý Ảnh (Vision / OCR)
         if "image" in file_type or file_name.endswith(('.png', '.jpg', '.jpeg', '.webp')):
-            img = Image.open(uploaded_file)
-            return "image", img
-            
-        # 2. Xử lý File PDF
+            return "image", Image.open(uploaded_file)
         elif file_name.endswith('.pdf'):
             pdf_reader = pypdf.PdfReader(BytesIO(uploaded_file.getvalue()))
-            text = "\n".join([page.extract_text() or "" for page in pdf_reader.pages])
-            return "text", text
-            
-        # 3. Xử lý File Word (.docx)
+            return "text", "\n".join([page.extract_text() or "" for page in pdf_reader.pages])
         elif file_name.endswith('.docx'):
             doc = docx.Document(BytesIO(uploaded_file.getvalue()))
-            text = "\n".join([p.text for p in doc.paragraphs if p.text])
-            return "text", text
-            
-        # 4. Xử lý File TXT
+            return "text", "\n".join([p.text for p in doc.paragraphs if p.text])
         elif file_name.endswith('.txt'):
-            text = uploaded_file.getvalue().decode("utf-8", errors="ignore")
-            return "text", text
-
+            return "text", uploaded_file.getvalue().decode("utf-8", errors="ignore")
     except Exception as e:
-        return "error", f"Lỗi đọc tệp {uploaded_file.name}: {e}"
-
+        return "error", f"Lỗi đọc tệp: {e}"
     return None, None
 
-# ==========================================
-# 3. TỪ ĐIỂN ĐA NGÔN NGỮ (i18n)
-# ==========================================
 LANG = {
     "vi": {
         "new_chat": "➕ Cuộc trò chuyện mới",
-        "choose_model": "⚡ Chọn mô hình AI:",
+        "choose_model": "⚡ Chọn mô hình NKN AI:",
         "web_search": "🌐 Tìm kiếm Web",
         "search_hist_placeholder": "🔍 Tìm kiếm lịch sử...",
         "chat_hist": "LỊCH SỬ TRÒ CHUYỆN",
@@ -153,7 +141,7 @@ LANG = {
     },
     "en": {
         "new_chat": "➕ New Chat",
-        "choose_model": "⚡ Choose AI Model:",
+        "choose_model": "⚡ Choose NKN AI Model:",
         "web_search": "🌐 Web Search",
         "search_hist_placeholder": "🔍 Search history...",
         "chat_hist": "CHAT HISTORY",
@@ -186,7 +174,7 @@ LANG = {
 }
 
 # ==========================================
-# 4. KHỞI TẠO SESSION STATE & CSS
+# 3. SESSION STATE & CSS TỐI ƯU GIAO DIỆN
 # ==========================================
 if "logged_in" not in st.session_state: st.session_state.logged_in = False
 if "username" not in st.session_state: st.session_state.username = ""
@@ -198,363 +186,232 @@ if "lang" not in st.session_state: st.session_state.lang = "vi"
 t = LANG[st.session_state.lang]
 
 def inject_custom_css():
-    css = """
+    st.markdown("""
     <style>
-        /* Ép hệ thống dùng giao diện Sáng (Chống Dark Mode Android) */
-        :root {
-            color-scheme: light !important;
-        }
-
-        /* Khóa màu nền trắng toàn bộ ứng dụng */
+        :root { color-scheme: light !important; }
         .stApp, [data-testid="stAppViewContainer"], [data-testid="stHeader"] { 
-            background-color: #ffffff !important; 
-            color: #1f2328 !important; 
+            background-color: #ffffff !important; color: #1f2328 !important; 
         }
-        
         [data-testid="stSidebar"] { 
-            background-color: #f6f8fa !important; 
-            border-right: 1px solid #d0d7de !important; 
+            background-color: #f6f8fa !important; border-right: 1px solid #d0d7de !important; 
         }
-
-        /* Khóa màu nền cho Selectbox, Chat Input và Input Text */
-        div[data-baseweb="select"] > div, 
-        .stTextInput input, 
-        [data-testid="stChatInput"] textarea,
-        [data-testid="stChatInput"] {
-            background-color: #ffffff !important;
-            color: #1f2328 !important;
-            border-color: #d0d7de !important;
+        div[data-baseweb="select"] > div, .stTextInput input, [data-testid="stChatInput"] textarea, [data-testid="stChatInput"] {
+            background-color: #ffffff !important; color: #1f2328 !important; border-color: #d0d7de !important;
         }
-
-        /* Nút bấm trắng đồng nhất */
-        .stButton > button {
-            background-color: #ffffff !important;
-            color: #1f2328 !important;
-            border: 1px solid #d0d7de !important;
-        }
-
-        .suggestion-card { 
-            background-color: #f6f8fa !important; 
-            border: 1px solid #d0d7de !important; 
-            color: #1f2328 !important; 
-            border-radius: 12px; 
-            padding: 16px; 
-            margin-bottom: 12px; 
-            min-height: 100px;
-        }
-        
+        .stButton > button { background-color: #ffffff !important; color: #1f2328 !important; border: 1px solid #d0d7de !important; }
+        .suggestion-card { background-color: #f6f8fa !important; border: 1px solid #d0d7de !important; color: #1f2328 !important; border-radius: 12px; padding: 16px; margin-bottom: 12px; min-height: 100px; }
         .suggestion-card span { color: #57606a !important; font-size: 0.9em; }
         p, h1, h2, h3, h4, h5, h6, span, label { color: #1f2328 !important; }
-        [data-testid="stBottomBlockContainer"] { padding-bottom: 12px !important; }
         [data-testid="stSidebarNav"] { display: none; }
-
-        /* Font Emoji Google hỗ trợ PC tốt hơn */
         @import url('https://fonts.googleapis.com/css2?family=Noto+Color+Emoji&display=swap');
-        body, button, input, select, textarea {
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Noto Color Emoji", sans-serif !important;
-        }
+        body, button, input, select, textarea { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Noto Color Emoji", sans-serif !important; }
     </style>
-    """
-    st.markdown(css, unsafe_allow_html=True)
+    """, unsafe_allow_html=True)
 
 inject_custom_css()
 
 # ==========================================
-# 5. HÀM DATABASE JSON & TÌM KIẾM
+# 4. DATABASE & BẢO MẬT
 # ==========================================
 DB_FILE = "users_db.json"
 CHATS_FILE = "chats_db.json"
 
-def load_db(file_name):
-    if not os.path.exists(file_name): return {}
-    try:
-        with open(file_name, "r", encoding="utf-8") as f:
-            data = json.load(f)
-            return data if isinstance(data, dict) else {}
-    except Exception:
-        return {}
+def load_db(f): 
+    if not os.path.exists(f): return {}
+    try: return json.load(open(f, "r", encoding="utf-8"))
+    except: return {}
 
-def save_db(data, file_name):
-    try:
-        with open(file_name, "w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False, indent=4)
-    except Exception as e:
-        st.error(f"Lỗi lưu dữ liệu: {e}")
+def save_db(data, f): json.dump(data, open(f, "w", encoding="utf-8"), ensure_ascii=False, indent=4)
+def hash_password(p): return hashlib.sha256(str.encode(p)).hexdigest()
 
-def hash_password(password):
-    return hashlib.sha256(str.encode(password)).hexdigest()
+def image_to_base64(img):
+    b = BytesIO(); img.save(b, format="PNG"); return base64.b64encode(b.getvalue()).decode('utf-8')
 
-def image_to_base64(image):
-    buffered = BytesIO()
-    image.save(buffered, format="PNG")
-    return base64.b64encode(buffered.getvalue()).decode('utf-8')
+def base64_to_image(b64):
+    try: return Image.open(BytesIO(base64.b64decode(b64)))
+    except: return None
 
-def base64_to_image(base64_str):
-    if not base64_str: return None
-    try:
-        return Image.open(BytesIO(base64.b64decode(base64_str)))
-    except Exception:
-        return None
-
-def search_duckduckgo(query):
-    results = []
+def search_duckduckgo(q):
     try:
         with DDGS() as ddgs:
-            for r in ddgs.text(query, max_results=4):
-                results.append(f"📌 **{r.get('title')}**\n{r.get('body')}")
-        return "\n\n".join(results) if results else "Không tìm thấy kết quả phù hợp từ NKN Search."
-    except Exception as e:
-        return f"Lỗi NKN Search: {e}"
+            res = [f"📌 **{r.get('title')}**\n{r.get('body')}" for r in ddgs.text(q, max_results=4)]
+            return "\n\n".join(res) if res else "Không tìm thấy kết quả."
+    except Exception as e: return f"Lỗi Search: {e}"
 
-# SYSTEM PROMPT ĐỊNH DANH SÁNG LẬP VIÊN
 SYSTEM_PROMPT = (
     "You are Astrox AI, an intelligent, helpful, and polite AI assistant. "
-    "Whenever anyone asks who created, built, founded, or developed you (e.g., 'ai tạo ra bạn', 'ai là người sáng lập', 'who created you', 'who is your founder'), "
-    "you MUST always answer clearly that Nguyễn Khôi Nguyên is your creator and founder. "
+    "Whenever anyone asks who created, built, founded, or developed you (e.g., 'ai tạo ra bạn', 'who created you', 'ai là người sáng lập'), "
+    "you MUST always answer clearly that Nguyễn Khôi Nguyên (NKN) is your creator and founder. "
     "Always respond in the same language as the user's message."
 )
 
 # ==========================================
-# 6. GIAO DIỆN CHƯA ĐĂNG NHẬP
+# 5. GIAO DIỆN CHƯA ĐĂNG NHẬP
 # ==========================================
 if not st.session_state.logged_in:
     st.write("<br><br>", unsafe_allow_html=True)
-    c_left, c_mid, c_right = st.columns([1, 2, 1])
+    _, c_mid, _ = st.columns([1, 2, 1])
     with c_mid:
-        if os.path.exists(LOGO_FILE):
-            st.image(LOGO_FILE, width=80)
+        if os.path.exists(LOGO_FILE): st.image(LOGO_FILE, width=80)
         st.title("Astrox AI")
+        st.caption("Powered by Nguyễn Khôi Nguyên (NKN)")
         st.write("---")
-        
         lang_sel = st.radio("Language / Ngôn ngữ:", ["Tiếng Việt", "English"], horizontal=True)
         st.session_state.lang = "en" if lang_sel == "English" else "vi"
         t = LANG[st.session_state.lang]
 
-        tab_login, tab_register = st.tabs([t["login"], t["register"]])
-        
-        with tab_login:
-            l_user = st.text_input(t["username"], key="login_user")
-            l_pass = st.text_input(t["password"], type="password", key="login_pass")
+        t_login, t_reg = st.tabs([t["login"], t["register"]])
+        with t_login:
+            l_u = st.text_input(t["username"], key="lu")
+            l_p = st.text_input(t["password"], type="password", key="lp")
             if st.button(t["btn_login"], type="primary", use_container_width=True):
                 users = load_db(DB_FILE)
-                if l_user in users and users[l_user].get("password") == hash_password(l_pass):
-                    st.session_state.logged_in = True
-                    st.session_state.username = l_user
-                    st.rerun()
-                else:
-                    st.error("Tên đăng nhập hoặc mật khẩu không chính xác!")
+                if l_u in users and users[l_u].get("password") == hash_password(l_p):
+                    st.session_state.logged_in = True; st.session_state.username = l_u; st.rerun()
+                else: st.error("Mật khẩu không chính xác!")
 
-        with tab_register:
-            r_user = st.text_input(t["username"] + " (Mới)", key="reg_user")
-            r_pass = st.text_input(t["password"] + " (Mới)", type="password", key="reg_pass")
+        with t_reg:
+            r_u = st.text_input(t["username"] + " (Mới)", key="ru")
+            r_p = st.text_input(t["password"] + " (Mới)", type="password", key="rp")
             if st.button(t["btn_reg"], type="primary", use_container_width=True):
-                if not r_user or not r_pass:
-                    st.warning("Vui lòng điền đầy đủ thông tin!")
-                else:
-                    users = load_db(DB_FILE)
-                    if r_user not in users:
-                        users[r_user] = {"password": hash_password(r_pass), "avatar_base64": ""}
-                        save_db(users, DB_FILE)
-                        st.session_state.logged_in = True
-                        st.session_state.username = r_user
-                        st.rerun()
-                    else:
-                        st.error("Tên đăng nhập này đã tồn tại!")
+                users = load_db(DB_FILE)
+                if r_u and r_u not in users:
+                    users[r_u] = {"password": hash_password(r_p), "avatar_base64": ""}
+                    save_db(users, DB_FILE)
+                    st.session_state.logged_in = True; st.session_state.username = r_u; st.rerun()
+                else: st.error("Tên đã tồn tại hoặc không hợp lệ!")
 
 # ==========================================
-# 7. GIAO DIỆN CHÍNH (ĐÃ ĐĂNG NHẬP)
+# 6. GIAO DIỆN CHÍNH (ĐÃ ĐĂNG NHẬP)
 # ==========================================
 else:
-    # --- SIDEBAR ---
     with st.sidebar:
-        c_logo, c_title = st.columns([1, 4])
-        with c_logo:
-            if os.path.exists(LOGO_FILE):
-                st.image(LOGO_FILE, width=40)
-            else:
-                st.markdown("## ✨")
-        with c_title:
-            st.markdown("<h3 style='margin: 0; padding-top: 5px;'>Astrox AI</h3>", unsafe_allow_html=True)
-            
+        st.title("Astrox AI")
         st.divider()
-
-        lang_choice = st.toggle("🇺🇸 English Mode", value=(st.session_state.lang == "en"))
-        new_lang = "en" if lang_choice else "vi"
-        if new_lang != st.session_state.lang:
-            st.session_state.lang = new_lang
-            st.rerun()
+        if st.toggle("🇺🇸 English Mode", value=(st.session_state.lang == "en")):
+            if st.session_state.lang != "en": st.session_state.lang = "en"; st.rerun()
+        else:
+            if st.session_state.lang != "vi": st.session_state.lang = "vi"; st.rerun()
 
         if st.button(t["new_chat"], use_container_width=True, type="primary"):
-            st.session_state.current_chat_id = None
-            st.session_state.messages = []
-            st.rerun()
-        
-        st.markdown("<br>", unsafe_allow_html=True)
-        
+            st.session_state.current_chat_id = None; st.session_state.messages = []; st.rerun()
+
+        # 📌 DANH SÁCH MÔ HÌNH NKN BRANDED (Đã đổi tên theo yêu cầu)
         MODEL_MAPPING = {
-            "⚡ Okaylastic 2.0 ": ("gemini", "gemini-3.6-flash"),
-            "🚀 NKNBel V3 ": ("openrouter", "deepseek/deepseek-chat"),
-            "Orchesta 4.0 ": ("openrouter", "openai/gpt-4o-mini")
+            "🧠 NKN Intelligent (Trí tuệ cao)": ("openrouter", "deepseek/deepseek-chat"),
+            "⚡ NKN Vision 3.6 (Quét ảnh & Tệp)": ("gemini", "gemini-3.6-flash"),
+            "🚀 NKN Fast Speed (Tốc độ siêu nhanh)": ("cerebras", "llama3.1-8b"),
+            "💥 NKN Cloud (Nền tảng Cloudflare)": ("cloudflare", "@cf/meta/llama-3-8b-instruct")
         }
-        
         model_choice = st.selectbox(t["choose_model"], list(MODEL_MAPPING.keys()))
-        
         enable_search = st.toggle(f"{t['web_search']} (DuckDuckGo)", value=False)
 
         with st.expander("🔑 Trạng thái API Key", expanded=False):
-            st.caption(f"• **Astrox Key:** {'✅ Đã có Key' if ASTROX_API_KEY else '❌ Chưa có Key'}")
-            st.caption(f"• **NKN Key:** {'✅ Đã có Key' if OPENROUTER_API_KEY else '❌ Chưa có Key'}")
+            st.caption(f"• **OpenRouter (NKN Intelligent):** {'✅' if OPENROUTER_API_KEY else '❌'}")
+            st.caption(f"• **Gemini (NKN Vision):** {'✅' if ASTROX_API_KEY else '❌'}")
+            st.caption(f"• **Cerebras (NKN Fast):** {'✅' if CEREBRAS_API_KEY else '❌'}")
+            st.caption(f"• **Cloudflare (NKN Cloud):** {'✅' if CLOUDFLARE_API_KEY and CLOUDFLARE_ACCOUNT_ID else '❌'}")
 
-        search_kw = st.text_input("🔍", key="search_kw", label_visibility="collapsed", placeholder=t["search_hist_placeholder"])
-
+        search_kw = st.text_input("🔍", key="skw", label_visibility="collapsed", placeholder=t["search_hist_placeholder"])
         st.caption(t["chat_hist"])
+        
         chats_db = load_db(CHATS_FILE).get(st.session_state.username, {})
         filtered_chats = {k: v for k, v in chats_db.items() if not search_kw or search_kw.lower() in v.get("title", "").lower()}
         
-        if not filtered_chats:
-            st.caption(t["no_hist"])
-            
         for c_id, c_data in reversed(list(filtered_chats.items())):
-            c_title = c_data.get("title", "Chat")[:18] + "..."
-            col1, col2 = st.columns([4, 1])
-            with col1:
-                btn_icon = "✨ " if c_id == st.session_state.current_chat_id else "💬 "
-                if st.button(btn_icon + c_title, key=f"chat_{c_id}", use_container_width=True):
-                    st.session_state.current_chat_id = c_id
-                    st.session_state.messages = c_data["messages"]
-                    st.rerun()
-            with col2:
-                if st.button("🗑️", key=f"del_{c_id}"):
+            c1, c2 = st.columns([4, 1])
+            with c1:
+                if st.button(("✨ " if c_id == st.session_state.current_chat_id else "💬 ") + c_data.get("title", "Chat")[:18], key=f"c_{c_id}", use_container_width=True):
+                    st.session_state.current_chat_id = c_id; st.session_state.messages = c_data["messages"]; st.rerun()
+            with c2:
+                if st.button("🗑️", key=f"d_{c_id}"):
                     del chats_db[c_id]
-                    all_chats = load_db(CHATS_FILE)
-                    all_chats[st.session_state.username] = chats_db
-                    save_db(all_chats, CHATS_FILE)
-                    if st.session_state.current_chat_id == c_id:
-                        st.session_state.current_chat_id = None
-                        st.session_state.messages = []
+                    all_c = load_db(CHATS_FILE); all_c[st.session_state.username] = chats_db; save_db(all_c, CHATS_FILE)
+                    if st.session_state.current_chat_id == c_id: st.session_state.current_chat_id = None; st.session_state.messages = []
                     st.rerun()
 
         st.divider()
-        users = load_db(DB_FILE)
-        av_b64 = users.get(st.session_state.username, {}).get("avatar_base64", "")
-        av_img = base64_to_image(av_b64)
-        
-        c_av, c_name = st.columns([1, 2])
-        with c_av:
-            if av_img: st.image(av_img, width=40)
-            else: st.markdown("👤")
-        with c_name:
-            st.markdown(f"**{st.session_state.username}**")
+        if st.button(t["profile"], use_container_width=True):
+            st.session_state.show_account_page = not st.session_state.show_account_page; st.rerun()
+        if st.button(t["logout"], use_container_width=True):
+            st.session_state.logged_in = False; st.rerun()
 
-        ca, cl = st.columns([1, 1])
-        with ca:
-            if st.button(t["profile"], use_container_width=True):
-                st.session_state.show_account_page = not st.session_state.show_account_page
-                st.rerun()
-        with cl:
-            if st.button(t["logout"], use_container_width=True):
-                st.session_state.logged_in = False
-                st.session_state.username = ""
-                st.rerun()
-
-    # --- NỘI DUNG CHÍNH ---
+    # --- MAIN VIEW ---
     if st.session_state.show_account_page:
         st.header(t["settings"])
         up_img = st.file_uploader(t["update_avatar"], type=["png", "jpg", "jpeg"])
         if up_img:
-            i = Image.open(up_img)
-            i.thumbnail((200, 200))
-            users = load_db(DB_FILE)
-            if st.session_state.username in users:
-                users[st.session_state.username]["avatar_base64"] = image_to_base64(i)
-                save_db(users, DB_FILE)
-                st.success("Đã cập nhật ảnh đại diện thành công!")
-                st.rerun()
-        if st.button(t["back_chat"]):
-            st.session_state.show_account_page = False
-            st.rerun()
-            
+            i = Image.open(up_img); i.thumbnail((200, 200))
+            u = load_db(DB_FILE)
+            if st.session_state.username in u:
+                u[st.session_state.username]["avatar_base64"] = image_to_base64(i); save_db(u, DB_FILE)
+                st.success("Đã cập nhật ảnh đại diện!"); st.rerun()
+        if st.button(t["back_chat"]): st.session_state.show_account_page = False; st.rerun()
+
     else:
         prompt_preset = None
-        
         if not st.session_state.messages:
-            st.markdown("<div style='height: 20px;'></div>", unsafe_allow_html=True)
-            st.markdown(f"<h1 style='color:#0969da; margin-bottom: 5px;'>{t['welcome']}{st.session_state.username} 👋</h1>", unsafe_allow_html=True)
-            st.markdown(f"<h3 style='margin-top: 0px; color: #57606a;'>{t['help_today']}</h3>", unsafe_allow_html=True)
-            st.markdown("<div style='height: 25px;'></div>", unsafe_allow_html=True)
-
-            col_g1, col_g2, col_g3 = st.columns(3)
-            with col_g1:
+            st.title(f"{t['welcome']}{st.session_state.username} 👋")
+            st.caption(t['help_today'])
+            cg1, cg2, cg3 = st.columns(3)
+            with cg1:
                 st.markdown(f'<div class="suggestion-card"><b>{t["idea_title"]}</b><br><span>{t["idea_desc"]}</span></div>', unsafe_allow_html=True)
-                if st.button(t["try_this"], key="p1", use_container_width=True):
-                    prompt_preset = "Gợi ý 3 kịch bản video ngắn thu hút người xem." if st.session_state.lang == "vi" else "Suggest 3 engaging short video scripts."
-            with col_g2:
+                if st.button(t["try_this"], key="p1", use_container_width=True): prompt_preset = "Gợi ý 3 kịch bản video ngắn."
+            with cg2:
                 st.markdown(f'<div class="suggestion-card"><b>{t["code_title"]}</b><br><span>{t["code_desc"]}</span></div>', unsafe_allow_html=True)
-                if st.button(t["try_this"], key="p2", use_container_width=True):
-                    prompt_preset = "Viết script Python crawl dữ liệu bài viết đơn giản." if st.session_state.lang == "vi" else "Write a simple Python script to crawl article data."
-            with col_g3:
+                if st.button(t["try_this"], key="p2", use_container_width=True): prompt_preset = "Viết script Python crawl dữ liệu đơn giản."
+            with cg3:
                 st.markdown(f'<div class="suggestion-card"><b>{t["search_title"]}</b><br><span>{t["search_desc"]}</span></div>', unsafe_allow_html=True)
-                if st.button(t["try_this"], key="p3", use_container_width=True):
-                    prompt_preset = "Tin tức mới nhất về trí tuệ nhân tạo tuần này?" if st.session_state.lang == "vi" else "Latest news on artificial intelligence this week?"
-        
+                if st.button(t["try_this"], key="p3", use_container_width=True): prompt_preset = "Tin tức mới nhất về AI?"
         else:
-            for message in st.session_state.messages:
-                with st.chat_message(message["role"]):
-                    st.markdown(message["content"])
+            for m in st.session_state.messages:
+                with st.chat_message(m["role"]): st.markdown(m["content"])
 
-        # 📌 KHU VỰC NÚT "📁 TẢI TỆP LÊN" (Đã kết nối Đa Ngôn Ngữ)
         with st.expander(t["upload_title"], expanded=False):
-            uploaded_file = st.file_uploader(
-                t["upload_label"],
-                type=["png", "jpg", "jpeg", "webp", "pdf", "docx", "txt"],
-                key="file_uploader_widget"
-            )
+            uploaded_file = st.file_uploader(t["upload_label"], type=["png", "jpg", "jpeg", "webp", "pdf", "docx", "txt"])
 
         prompt_input = st.chat_input(t["chat_placeholder"])
         prompt = prompt_input or prompt_preset
 
         if prompt:
             f_type, f_data = process_uploaded_file(uploaded_file)
-            
-            file_context = ""
-            if f_type == "text":
-                file_context = f"\n\n[Nội dung tệp đính kèm '{uploaded_file.name}']:\n{f_data}\n"
-            elif f_type == "error":
-                st.error(f_data)
+            file_context = f"\n\n[Dữ liệu tệp]:\n{f_data}\n" if f_type == "text" else ""
+            display_msg = f"📎 **[{uploaded_file.name}]**\n\n" + prompt if uploaded_file else prompt
 
-            display_user_msg = prompt
-            if uploaded_file:
-                display_user_msg = f"📎 **[{'Đã đính kèm tệp' if st.session_state.lang == 'vi' else 'Attached file'}: {uploaded_file.name}]**\n\n" + prompt
-
-            st.session_state.messages.append({"role": "user", "content": display_user_msg})
-            
-            if not st.session_state.current_chat_id:
-                st.session_state.current_chat_id = str(uuid.uuid4())
+            st.session_state.messages.append({"role": "user", "content": display_msg})
+            if not st.session_state.current_chat_id: st.session_state.current_chat_id = str(uuid.uuid4())
 
             with st.chat_message("user"):
-                if f_type == "image":
-                    st.image(f_data, width=300)
-                st.markdown(display_user_msg)
+                if f_type == "image": st.image(f_data, width=300)
+                st.markdown(display_msg)
 
             with st.chat_message("assistant"):
                 s_context = ""
                 if enable_search:
-                    with st.status(t['search_status'], expanded=False):
+                    with st.status(t['search_status']):
                         s_res = search_duckduckgo(prompt)
-                        if s_res:
-                            s_context = f"\n\n[Dữ liệu Tìm kiếm Web từ nknsearch]:\n{s_res}"
+                        if s_res: s_context = f"\n\n[Search Data]:\n{s_res}"
 
                 final_prompt = prompt + file_context + s_context
                 response = ""
-                
-                provider, model_id = MODEL_MAPPING.get(model_choice, ("gemini", "gemini-3.6-flash"))
+                provider, model_id = MODEL_MAPPING.get(model_choice, ("openrouter", "deepseek/deepseek-chat"))
 
-                # -------------------------------------------------------------
-                # 1. GỌI API GEMINI TRỰC TIẾP (Đã fix lỗi metadata ảnh)
-                # -------------------------------------------------------------
-                if provider == "gemini":
-                    if not client_gemini:
-                        response = "⚠️ **Lỗi**: Chưa cấu hình `ASTROX_API_KEY`."
+                # 1. NKN INTELLIGENT (OPENROUTER - DEEPSEEK V3)
+                if provider == "openrouter":
+                    if not client_openrouter: response = "⚠️ Chưa cấu hình `OPENROUTER_API_KEY` cho NKN Intelligent."
+                    else:
+                        try:
+                            msgs = [{"role": "system", "content": SYSTEM_PROMPT}]
+                            for m in st.session_state.messages[:-1]: msgs.append({"role": m["role"], "content": m["content"]})
+                            msgs.append({"role": "user", "content": final_prompt})
+
+                            res = client_openrouter.chat.completions.create(model=model_id, messages=msgs, stream=False)
+                            response = res.choices[0].message.content
+                        except Exception as e: response = f"❌ Lỗi NKN Intelligent API: {e}"
+
+                # 2. NKN VISION 3.6 (GEMINI)
+                elif provider == "gemini":
+                    if not client_gemini: response = "⚠️ Chưa có `ASTROX_API_KEY`."
                     else:
                         try:
                             contents = []
@@ -563,91 +420,56 @@ else:
                                 contents.append(types.Content(role=role, parts=[types.Part.from_text(text=m["content"])]))
                             
                             if f_type == "image":
-                                img_byte_arr = BytesIO()
-                                f_data.save(img_byte_arr, format="PNG")
-                                img_bytes = img_byte_arr.getvalue()
-                                
-                                image_part = types.Part.from_bytes(
-                                    data=img_bytes,
-                                    mime_type="image/png"
-                                )
-                                contents.append(types.Content(
-                                    role="user", 
-                                    parts=[image_part, types.Part.from_text(text=final_prompt)]
-                                ))
+                                img_b = BytesIO(); f_data.save(img_b, format="PNG")
+                                image_part = types.Part.from_bytes(data=img_b.getvalue(), mime_type="image/png")
+                                contents.append(types.Content(role="user", parts=[image_part, types.Part.from_text(text=final_prompt)]))
                             else:
-                                contents.append(types.Content(
-                                    role="user", 
-                                    parts=[types.Part.from_text(text=final_prompt)]
-                                ))
+                                contents.append(types.Content(role="user", parts=[types.Part.from_text(text=final_prompt)]))
 
-                            res = client_gemini.models.generate_content(
-                                model=model_id,
-                                contents=contents,
-                                config=types.GenerateContentConfig(
-                                    system_instruction=SYSTEM_PROMPT
-                                )
-                            )
+                            res = client_gemini.models.generate_content(model=model_id, contents=contents, config=types.GenerateContentConfig(system_instruction=SYSTEM_PROMPT))
                             response = res.text
-                        except Exception as e:
-                            response = f"❌ **Lỗi gọi Astrox Gemini API**: {e}"
+                        except Exception as e: response = f"❌ Lỗi NKN Vision API: {e}"
 
-                # -------------------------------------------------------------
-                # 2. GỌI API OPENROUTER (Đã fix lỗi RGBA -> JPEG)
-                # -------------------------------------------------------------
-                elif provider == "openrouter":
-                    if not OPENROUTER_API_KEY:
-                        response = "⚠️ **Lỗi**: Chưa cấu hình `OPENROUTER_API_KEY`."
+                # 3. NKN FAST SPEED (CEREBRAS)
+                elif provider == "cerebras":
+                    if not client_cerebras: response = "⚠️ Chưa cấu hình `CEREBRAS_API_KEY`."
                     else:
                         try:
-                            formatted_messages = [{"role": "system", "content": SYSTEM_PROMPT}]
-                            for m in st.session_state.messages[:-1]:
-                                formatted_messages.append({"role": m["role"], "content": m["content"]})
-                            
-                            if f_type == "image":
-                                buffered = BytesIO()
-                                img_rgb = f_data.convert("RGB")
-                                img_rgb.save(buffered, format="JPEG")
-                                img_str = base64.b64encode(buffered.getvalue()).decode()
-                                
-                                formatted_messages.append({
-                                    "role": "user",
-                                    "content": [
-                                        {"type": "text", "text": final_prompt},
-                                        {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{img_str}"}}
-                                    ]
-                                })
-                            else:
-                                formatted_messages.append({"role": "user", "content": final_prompt})
+                            msgs = [{"role": "system", "content": SYSTEM_PROMPT}]
+                            for m in st.session_state.messages[:-1]: msgs.append({"role": m["role"], "content": m["content"]})
+                            msgs.append({"role": "user", "content": final_prompt})
 
-                            completion = client_openrouter.chat.completions.create(
-                                model=model_id,
-                                messages=formatted_messages,
-                                extra_headers={
-                                    "HTTP-Referer": "https://astrox.streamlit.app",
-                                    "X-Title": "Astrox AI"
-                                },
-                                stream=False
-                            )
-                            response = completion.choices[0].message.content
-                        except Exception as e:
-                            response = f"❌ **Lỗi gọi OpenRouter API**: {e}"
+                            res = client_cerebras.chat.completions.create(model=model_id, messages=msgs, stream=False)
+                            response = res.choices[0].message.content
+                        except Exception as e: response = f"❌ Lỗi NKN Fast Speed API: {e}"
+
+                # 4. NKN CLOUD (CLOUDFLARE WORKERS AI)
+                elif provider == "cloudflare":
+                    if not CLOUDFLARE_API_KEY or not CLOUDFLARE_ACCOUNT_ID: response = "⚠️ Chưa cấu hình `CLOUDFLARE_API_KEY` hoặc `CLOUDFLARE_ACCOUNT_ID`."
+                    else:
+                        try:
+                            cf_url = f"https://api.cloudflare.com/client/v4/accounts/{CLOUDFLARE_ACCOUNT_ID}/ai/run/{model_id}"
+                            headers = {"Authorization": f"Bearer {CLOUDFLARE_API_KEY}"}
+                            
+                            msgs = [{"role": "system", "content": SYSTEM_PROMPT}]
+                            for m in st.session_state.messages[:-1]: msgs.append({"role": m["role"], "content": m["content"]})
+                            msgs.append({"role": "user", "content": final_prompt})
+
+                            cf_res = requests.post(cf_url, headers=headers, json={"messages": msgs}, timeout=30)
+                            res_json = cf_res.json()
+
+                            if res_json.get("success"):
+                                response = res_json.get("result", {}).get("response", "Không có phản hồi.")
+                            else:
+                                response = f"❌ Lỗi NKN Cloud: {res_json.get('errors')}"
+                        except Exception as e: response = f"❌ Lỗi NKN Cloud API: {e}"
 
                 st.markdown(response)
 
             st.session_state.messages.append({"role": "assistant", "content": response})
-            
-            all_chats = load_db(CHATS_FILE)
-            if st.session_state.username not in all_chats:
-                all_chats[st.session_state.username] = {}
-                
-            chat_title = all_chats[st.session_state.username].get(
-                st.session_state.current_chat_id, {}
-            ).get("title", prompt[:30])
-            
-            all_chats[st.session_state.username][st.session_state.current_chat_id] = {
-                "title": chat_title, 
-                "messages": st.session_state.messages
-            }
-            save_db(all_chats, CHATS_FILE)
+            all_c = load_db(CHATS_FILE)
+            if st.session_state.username not in all_c: all_c[st.session_state.username] = {}
+            c_title = all_c[st.session_state.username].get(st.session_state.current_chat_id, {}).get("title", prompt[:30])
+            all_c[st.session_state.username][st.session_state.current_chat_id] = {"title": c_title, "messages": st.session_state.messages}
+            save_db(all_c, CHATS_FILE)
             st.rerun()
