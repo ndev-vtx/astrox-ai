@@ -3,6 +3,7 @@ import json
 import hashlib
 import base64
 import uuid
+import random
 import requests
 from io import BytesIO
 from PIL import Image
@@ -132,8 +133,8 @@ LANG = {
         "idea_desc": "Gợi ý kịch bản video hoặc viết bài blog hấp dẫn",
         "code_title": "💻 Lập trình & Code",
         "code_desc": "Viết code Python, HTML hoặc sửa lỗi lập trình",
-        "search_title": "🎨 Tạo ảnh AI",
-        "search_desc": "Tạo bức tranh phong cảnh hoặc nhân vật anime",
+        "search_title": "🎨 Tạo ảnh AI Flux HD",
+        "search_desc": "Tạo bức tranh phong cảnh bãi biển hoặc nhân vật anime",
         "try_this": "Thử gợi ý này",
         "upload_title": "📁 Tải tệp lên (Quét ảnh / Đọc file PDF, Docx, TXT)",
         "upload_label": "Chọn tệp từ máy tính:",
@@ -166,7 +167,7 @@ LANG = {
         "code_title": "💻 Programming & Code",
         "code_desc": "Write Python, HTML or fix coding bugs",
         "search_title": "🎨 AI Image Generator",
-        "search_desc": "Generate landscape wallpaper or anime characters",
+        "search_desc": "Generate tropical beach wallpaper or anime characters",
         "try_this": "Try this",
         "upload_title": "📁 Upload File (Scan Image / Read PDF, Docx, TXT)",
         "upload_label": "Choose a file from your computer:",
@@ -183,6 +184,7 @@ if "current_chat_id" not in st.session_state: st.session_state.current_chat_id =
 if "messages" not in st.session_state: st.session_state.messages = []
 if "show_account_page" not in st.session_state: st.session_state.show_account_page = False
 if "lang" not in st.session_state: st.session_state.lang = "vi"
+if "last_processed_audio_hash" not in st.session_state: st.session_state.last_processed_audio_hash = ""
 
 t = LANG[st.session_state.lang]
 
@@ -270,7 +272,7 @@ if not st.session_state.logged_in:
         with t_reg:
             r_u = st.text_input(t["username"] + " (Mới)", key="ru")
             r_p = st.text_input(t["password"] + " (Mới)", type="password", key="rp")
-            if st.button(r_p and t["btn_reg"], type="primary", use_container_width=True):
+            if st.button(t["btn_reg"], type="primary", use_container_width=True):
                 users = load_db(DB_FILE)
                 if r_u and r_u not in users:
                     users[r_u] = {"password": hash_password(r_p), "avatar_base64": ""}
@@ -297,13 +299,12 @@ else:
         if st.button(t["new_chat"], use_container_width=True, type="primary"):
             st.session_state.current_chat_id = None; st.session_state.messages = []; st.rerun()
 
-        # 📌 MÔ HÌNH NKN CHUẨN - KHÔNG CHỨA GIẢI THÍCH TRONG NGOẶC
         MODEL_MAPPING = {
             "🧠 NKN Intelligent": ("openrouter", "deepseek/deepseek-chat"),
             "⚡ NKN Vision": ("gemini", "gemini-3.6-flash"),
             "🚀 NKN Fast Speed": ("cerebras", "llama3.1-8b"),
             "💥 NKN Cloud": ("cloudflare", "@cf/meta/llama-3.1-8b-instruct"),
-            "🎨 NKN Image Creator": ("image_gen", "pollinations")
+            "🎨 NKN Image Creator": ("image_gen", "flux")
         }
         model_choice = st.selectbox(t["choose_model"], list(MODEL_MAPPING.keys()))
         enable_search = st.toggle(f"{t['web_search']} (DuckDuckGo)", value=False)
@@ -370,14 +371,14 @@ else:
             with cg3:
                 st.markdown(f'<div class="suggestion-card"><b>{t["search_title"]}</b><br><span>{t["search_desc"]}</span></div>', unsafe_allow_html=True)
                 if st.button(t["try_this"], key="p3", use_container_width=True): 
-                    prompt_preset = "Tạo ảnh một hòn đảo viễn tưởng lung linh ban đêm"
+                    prompt_preset = "Hình ảnh bãi biển nhiệt đới mộng mơ với cát trắng và nước biển trong xanh"
                     model_choice = "🎨 NKN Image Creator"
         else:
             for m in st.session_state.messages:
                 avatar = BOT_AVATAR if m["role"] == "assistant" else None
                 with st.chat_message(m["role"], avatar=avatar):
                     if m.get("type") == "image":
-                        st.image(m["content"], caption="Ảnh được tạo bởi NKN Image Creator")
+                        st.image(m["content"], caption="Ảnh được tạo bởi NKN Image Creator (Flux HD)")
                     else:
                         st.markdown(m["content"])
 
@@ -392,21 +393,25 @@ else:
         prompt_input = st.chat_input(t["chat_placeholder"])
         prompt = prompt_input or prompt_preset
 
-        # Nếu người dùng thu âm qua Micro -> Chuyển audio thành prompt
+        # --- 🛠️ CHỐNG GLITCH MICRO: CHỈ XỬ LÝ ÂM THANH MỚI 1 LẦN DUY NHẤT ---
         if audio_recorded and not prompt:
-            if client_gemini:
-                with st.spinner("🎙️ Đang lắng nghe & chuyển đổi giọng nói..."):
-                    try:
-                        audio_bytes = audio_recorded.getvalue()
-                        res_audio = client_gemini.models.generate_content(
-                            model="gemini-3.6-flash",
-                            contents=[types.Part.from_bytes(data=audio_bytes, mime_type="audio/wav"), "Hãy chép lại chính xác nội dung câu nói trong file âm thanh này bằng văn bản."]
-                        )
-                        prompt = res_audio.text
-                    except Exception as e:
-                        st.error(f"Lỗi nhận diện giọng nói: {e}")
-            else:
-                st.warning("⚠️ Cần NKN Key để sử dụng tính năng giọng nói.")
+            audio_bytes = audio_recorded.getvalue()
+            current_audio_hash = hashlib.md5(audio_bytes).hexdigest()
+            
+            if current_audio_hash != st.session_state.last_processed_audio_hash:
+                if client_gemini:
+                    with st.spinner("🎙️ Đang lắng nghe & chuyển đổi giọng nói..."):
+                        try:
+                            res_audio = client_gemini.models.generate_content(
+                                model="gemini-3.6-flash",
+                                contents=[types.Part.from_bytes(data=audio_bytes, mime_type="audio/wav"), "Chép lại chính xác nội dung câu nói này bằng văn bản, không giải thích thêm:"]
+                            )
+                            prompt = res_audio.text.strip()
+                            st.session_state.last_processed_audio_hash = current_audio_hash
+                        except Exception as e:
+                            st.error(f"Lỗi nhận diện giọng nói: {e}")
+                else:
+                    st.warning("⚠️ Cần Gemini Key để sử dụng tính năng giọng nói.")
 
         if prompt:
             f_type, f_data = process_uploaded_file(uploaded_file)
@@ -432,13 +437,25 @@ else:
                 response_type = "text"
                 provider, model_id = MODEL_MAPPING.get(model_choice, ("openrouter", "deepseek/deepseek-chat"))
 
-                # 1. NKN IMAGE CREATOR (TẠO ẢNH AI)
+                # 1. 🎨 NKN IMAGE CREATOR (CẢI TIẾN TỰ DỊCH PROMPT + ENGINE FLUX CHẤT LƯỢNG CAO)
                 if provider == "image_gen":
-                    with st.spinner("🎨 NKN Image Creator đang vẽ bức ảnh cho bạn..."):
-                        img_url = f"https://image.pollinations.ai/prompt/{quote(prompt)}?width=1024&height=1024&nologo=true"
+                    with st.spinner("🎨 NKN Image Creator đang dùng Flux AI thiết kế bức ảnh HD cho bạn..."):
+                        english_prompt = prompt
+                        # Tự động dịch prompt Việt -> Anh chuẩn xác để AI vẽ đúng chủ đề
+                        if client_gemini:
+                            try:
+                                trans_res = client_gemini.models.generate_content(
+                                    model="gemini-3.6-flash",
+                                    contents=f"Translate this image prompt into a detailed English prompt for Flux AI image generator. Output ONLY the English prompt: {prompt}"
+                                )
+                                english_prompt = trans_res.text.strip()
+                            except: pass
+
+                        seed = random.randint(1000, 999999)
+                        img_url = f"https://image.pollinations.ai/prompt/{quote(english_prompt)}?model=flux&width=1024&height=1024&seed={seed}&nologo=true"
                         response = img_url
                         response_type = "image"
-                        st.image(img_url, caption=f"Hình ảnh: {prompt}")
+                        st.image(img_url, caption=f"Prompt: {prompt}")
 
                 # 2. NKN INTELLIGENT
                 elif provider == "openrouter":
