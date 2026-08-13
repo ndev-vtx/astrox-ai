@@ -298,10 +298,10 @@ else:
 
         # 📌 DANH SÁCH MÔ HÌNH NKN BRANDED (Đã đổi tên theo yêu cầu)
         MODEL_MAPPING = {
-            "🧠 NKN Intelligent (Trí tuệ cao)": ("openrouter", "deepseek/deepseek-chat"),
-            "⚡ NKN Vision 3.6 (Quét ảnh & Tệp)": ("gemini", "gemini-3.6-flash"),
-            "🚀 NKN Fast Speed (Tốc độ siêu nhanh)": ("cerebras", "llama3.1-8b"),
-            "💥 NKN Cloud (Nền tảng Cloudflare)": ("cloudflare", "@cf/meta/llama-3-8b-instruct")
+            "🧠 NKN Intelligent": ("openrouter", "deepseek/deepseek-chat"),
+            "⚡ NKN Vision 3.)": ("gemini", "gemini-3.6-flash"),
+            "🚀 NKN Fast Speed": ("cerebras", "llama3.1-8b"),
+            "💥 NKN Cloud": ("cloudflare", "@cf/meta/llama-3-8b-instruct")
         }
         model_choice = st.selectbox(t["choose_model"], list(MODEL_MAPPING.keys()))
         enable_search = st.toggle(f"{t['web_search']} (DuckDuckGo)", value=False)
