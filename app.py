@@ -299,7 +299,7 @@ else:
         # 📌 DANH SÁCH MÔ HÌNH NKN BRANDED (Đã đổi tên theo yêu cầu)
         MODEL_MAPPING = {
             "🧠 NKN Intelligent": ("openrouter", "deepseek/deepseek-chat"),
-            "⚡ NKN Vision 3.)": ("gemini", "gemini-3.6-flash"),
+            "⚡ NKN Vision 3.0": ("gemini", "gemini-3.6-flash"),
             "🚀 NKN Fast Speed": ("cerebras", "llama3.1-8b"),
             "💥 NKN Cloud": ("cloudflare", "@cf/meta/llama-3-8b-instruct")
         }
