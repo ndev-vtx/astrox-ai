@@ -56,7 +56,7 @@ CEREBRAS_API_KEY = get_secret("CEREBRAS_API_KEY")
 CLOUDFLARE_API_KEY = get_secret("CLOUDFLARE_API_KEY")
 CLOUDFLARE_ACCOUNT_ID = get_secret("CLOUDFLARE_ACCOUNT_ID")
 
-# 1. Gemini Client (Đã sửa đổi cho SDK mới)
+# 1. Gemini Client
 client_gemini = None
 if ASTROX_API_KEY:
     try:
@@ -64,12 +64,12 @@ if ASTROX_API_KEY:
     except Exception as e:
         st.error(f"Lỗi Gemini Client: {e}")
 
-# 2. OpenRouter Client (Dành cho NKN Intelligent)
+# 2. OpenRouter Client (NKN Intelligent)
 client_openrouter = None
 if OPENROUTER_API_KEY:
     client_openrouter = OpenAI(api_key=OPENROUTER_API_KEY, base_url=OPENROUTER_BASE_URL)
 
-# 3. Cerebras Client (Dành cho NKN Fast Speed)
+# 3. Cerebras Client (NKN Fast Speed)
 client_cerebras = None
 if CEREBRAS_API_KEY:
     client_cerebras = OpenAI(api_key=CEREBRAS_API_KEY, base_url="https://api.cerebras.ai/v1")
@@ -296,19 +296,19 @@ else:
         if st.button(t["new_chat"], use_container_width=True, type="primary"):
             st.session_state.current_chat_id = None; st.session_state.messages = []; st.rerun()
 
-        # 📌 DANH SÁCH MÔ HÌNH NKN BRANDED (Đã đổi tên theo yêu cầu)
+        # 📌 ĐÃ CẬP NHẬT MODEL CLOUDFLARE SANG @cf/meta/llama-3.1-8b-instruct
         MODEL_MAPPING = {
             "🧠 NKN Intelligent": ("openrouter", "deepseek/deepseek-chat"),
-            "⚡ NKN Vision 3.0": ("gemini", "gemini-3.6-flash"),
+            "⚡ NKN Vision 3.6": ("gemini", "gemini-3.6-flash"),
             "🚀 NKN Fast Speed": ("cerebras", "llama3.1-8b"),
-            "💥 NKN Cloud": ("cloudflare", "@cf/meta/llama-3-8b-instruct")
+            "💥 NKN Cloud": ("cloudflare", "@cf/meta/llama-3.1-8b-instruct")
         }
         model_choice = st.selectbox(t["choose_model"], list(MODEL_MAPPING.keys()))
         enable_search = st.toggle(f"{t['web_search']} (DuckDuckGo)", value=False)
 
         with st.expander("🔑 Trạng thái API Key", expanded=False):
             st.caption(f"• **OpenRouter (NKN Intelligent):** {'✅' if OPENROUTER_API_KEY else '❌'}")
-            st.caption(f"• **Gemini (NKN Vision):** {'✅' if ASTROX_API_KEY else '❌'}")
+            st.caption(f"• **NKN API (NKN Vision):** {'✅' if ASTROX_API_KEY else '❌'}")
             st.caption(f"• **Cerebras (NKN Fast):** {'✅' if CEREBRAS_API_KEY else '❌'}")
             st.caption(f"• **Cloudflare (NKN Cloud):** {'✅' if CLOUDFLARE_API_KEY and CLOUDFLARE_ACCOUNT_ID else '❌'}")
 
@@ -443,7 +443,7 @@ else:
                             response = res.choices[0].message.content
                         except Exception as e: response = f"❌ Lỗi NKN Fast Speed API: {e}"
 
-                # 4. NKN CLOUD (CLOUDFLARE WORKERS AI)
+                # 4. NKN CLOUD (CLOUDFLARE WORKERS AI - MODEL MỚI)
                 elif provider == "cloudflare":
                     if not CLOUDFLARE_API_KEY or not CLOUDFLARE_ACCOUNT_ID: response = "⚠️ Chưa cấu hình `CLOUDFLARE_API_KEY` hoặc `CLOUDFLARE_ACCOUNT_ID`."
                     else:
