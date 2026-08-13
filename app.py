@@ -6,6 +6,7 @@ import uuid
 import requests
 from io import BytesIO
 from PIL import Image
+from urllib.parse import quote
 
 import streamlit as st
 from dotenv import load_dotenv
@@ -56,7 +57,6 @@ CEREBRAS_API_KEY = get_secret("CEREBRAS_API_KEY")
 CLOUDFLARE_API_KEY = get_secret("CLOUDFLARE_API_KEY")
 CLOUDFLARE_ACCOUNT_ID = get_secret("CLOUDFLARE_ACCOUNT_ID")
 
-# 1. Gemini Client
 client_gemini = None
 if ASTROX_API_KEY:
     try:
@@ -64,21 +64,20 @@ if ASTROX_API_KEY:
     except Exception as e:
         st.error(f"Lỗi Gemini Client: {e}")
 
-# 2. OpenRouter Client (NKN Intelligent)
 client_openrouter = None
 if OPENROUTER_API_KEY:
     client_openrouter = OpenAI(api_key=OPENROUTER_API_KEY, base_url=OPENROUTER_BASE_URL)
 
-# 3. Cerebras Client (NKN Fast Speed)
 client_cerebras = None
 if CEREBRAS_API_KEY:
     client_cerebras = OpenAI(api_key=CEREBRAS_API_KEY, base_url="https://api.cerebras.ai/v1")
 
 LOGO_FILE = "astrox_logo.png"
+BOT_AVATAR = LOGO_FILE if os.path.exists(LOGO_FILE) else "✨"
 
 st.set_page_config(
     page_title="Astrox AI - Powered by NKN",
-    page_icon=LOGO_FILE if os.path.exists(LOGO_FILE) else "✨",
+    page_icon=BOT_AVATAR,
     layout="wide",
     initial_sidebar_state="expanded"
 )
@@ -124,7 +123,7 @@ LANG = {
         "btn_reg": "Tạo tài khoản & Bắt đầu",
         "welcome": "Xin chào, ",
         "help_today": "Hôm nay Astrox AI có thể giúp gì cho bạn?",
-        "chat_placeholder": "Nhập tin nhắn hoặc hỏi bất kỳ điều gì...",
+        "chat_placeholder": "Nhập tin nhắn hoặc mô tả ảnh cần tạo...",
         "search_status": "🔍 Đang tìm kiếm thông tin trên Web...",
         "settings": "Cài đặt tài khoản",
         "update_avatar": "Cập nhật ảnh đại diện",
@@ -133,11 +132,12 @@ LANG = {
         "idea_desc": "Gợi ý kịch bản video hoặc viết bài blog hấp dẫn",
         "code_title": "💻 Lập trình & Code",
         "code_desc": "Viết code Python, HTML hoặc sửa lỗi lập trình",
-        "search_title": "🌐 Tìm kiếm thông tin",
-        "search_desc": "Tin tức mới nhất về công nghệ và AI hiện nay",
+        "search_title": "🎨 Tạo ảnh AI",
+        "search_desc": "Tạo bức tranh phong cảnh hoặc nhân vật anime",
         "try_this": "Thử gợi ý này",
         "upload_title": "📁 Tải tệp lên (Quét ảnh / Đọc file PDF, Docx, TXT)",
-        "upload_label": "Chọn tệp từ máy tính:"
+        "upload_label": "Chọn tệp từ máy tính:",
+        "mic_label": "🎙️ Thu âm câu hỏi (Micro)"
     },
     "en": {
         "new_chat": "➕ New Chat",
@@ -156,7 +156,7 @@ LANG = {
         "btn_reg": "Create Account & Start",
         "welcome": "Hello, ",
         "help_today": "How can Astrox AI help you today?",
-        "chat_placeholder": "Ask Astrox AI anything...",
+        "chat_placeholder": "Ask Astrox AI or describe an image to generate...",
         "search_status": "🔍 Searching the Web...",
         "settings": "Account Settings",
         "update_avatar": "Update Profile Picture",
@@ -165,11 +165,12 @@ LANG = {
         "idea_desc": "Suggest video scripts or engaging blog posts",
         "code_title": "💻 Programming & Code",
         "code_desc": "Write Python, HTML or fix coding bugs",
-        "search_title": "🌐 Search Information",
-        "search_desc": "Latest news on tech and AI trends",
+        "search_title": "🎨 AI Image Generator",
+        "search_desc": "Generate landscape wallpaper or anime characters",
         "try_this": "Try this",
         "upload_title": "📁 Upload File (Scan Image / Read PDF, Docx, TXT)",
-        "upload_label": "Choose a file from your computer:"
+        "upload_label": "Choose a file from your computer:",
+        "mic_label": "🎙️ Record Audio (Microphone)"
     }
 }
 
@@ -227,10 +228,6 @@ def hash_password(p): return hashlib.sha256(str.encode(p)).hexdigest()
 def image_to_base64(img):
     b = BytesIO(); img.save(b, format="PNG"); return base64.b64encode(b.getvalue()).decode('utf-8')
 
-def base64_to_image(b64):
-    try: return Image.open(BytesIO(base64.b64decode(b64)))
-    except: return None
-
 def search_duckduckgo(q):
     try:
         with DDGS() as ddgs:
@@ -252,7 +249,7 @@ if not st.session_state.logged_in:
     st.write("<br><br>", unsafe_allow_html=True)
     _, c_mid, _ = st.columns([1, 2, 1])
     with c_mid:
-        if os.path.exists(LOGO_FILE): st.image(LOGO_FILE, width=80)
+        if os.path.exists(LOGO_FILE): st.image(LOGO_FILE, width=90)
         st.title("Astrox AI")
         st.caption("Powered by Nguyễn Khôi Nguyên (NKN)")
         st.write("---")
@@ -273,7 +270,7 @@ if not st.session_state.logged_in:
         with t_reg:
             r_u = st.text_input(t["username"] + " (Mới)", key="ru")
             r_p = st.text_input(t["password"] + " (Mới)", type="password", key="rp")
-            if st.button(t["btn_reg"], type="primary", use_container_width=True):
+            if st.button(r_p and t["btn_reg"], type="primary", use_container_width=True):
                 users = load_db(DB_FILE)
                 if r_u and r_u not in users:
                     users[r_u] = {"password": hash_password(r_p), "avatar_base64": ""}
@@ -286,8 +283,12 @@ if not st.session_state.logged_in:
 # ==========================================
 else:
     with st.sidebar:
+        if os.path.exists(LOGO_FILE):
+            st.image(LOGO_FILE, width=60)
         st.title("Astrox AI")
+        st.caption("Powered by NKN")
         st.divider()
+
         if st.toggle("🇺🇸 English Mode", value=(st.session_state.lang == "en")):
             if st.session_state.lang != "en": st.session_state.lang = "en"; st.rerun()
         else:
@@ -296,21 +297,22 @@ else:
         if st.button(t["new_chat"], use_container_width=True, type="primary"):
             st.session_state.current_chat_id = None; st.session_state.messages = []; st.rerun()
 
-        # 📌 ĐÃ CẬP NHẬT MODEL CLOUDFLARE SANG @cf/meta/llama-3.1-8b-instruct
+        # 📌 MÔ HÌNH NKN CHUẨN - KHÔNG CHỨA GIẢI THÍCH TRONG NGOẶC
         MODEL_MAPPING = {
             "🧠 NKN Intelligent": ("openrouter", "deepseek/deepseek-chat"),
-            "⚡ NKN Vision 3.6": ("gemini", "gemini-3.6-flash"),
+            "⚡ NKN Vision": ("gemini", "gemini-3.6-flash"),
             "🚀 NKN Fast Speed": ("cerebras", "llama3.1-8b"),
-            "💥 NKN Cloud": ("cloudflare", "@cf/meta/llama-3.1-8b-instruct")
+            "💥 NKN Cloud": ("cloudflare", "@cf/meta/llama-3.1-8b-instruct"),
+            "🎨 NKN Image Creator": ("image_gen", "pollinations")
         }
         model_choice = st.selectbox(t["choose_model"], list(MODEL_MAPPING.keys()))
         enable_search = st.toggle(f"{t['web_search']} (DuckDuckGo)", value=False)
 
         with st.expander("🔑 Trạng thái API Key", expanded=False):
-            st.caption(f"• **OpenRouter (NKN Intelligent):** {'✅' if OPENROUTER_API_KEY else '❌'}")
-            st.caption(f"• **NKN API (NKN Vision):** {'✅' if ASTROX_API_KEY else '❌'}")
-            st.caption(f"• **Cerebras (NKN Fast):** {'✅' if CEREBRAS_API_KEY else '❌'}")
-            st.caption(f"• **Cloudflare (NKN Cloud):** {'✅' if CLOUDFLARE_API_KEY and CLOUDFLARE_ACCOUNT_ID else '❌'}")
+            st.caption(f"• **OpenRouter:** {'✅' if OPENROUTER_API_KEY else '❌'}")
+            st.caption(f"• **NKN API:** {'✅' if ASTROX_API_KEY else '❌'}")
+            st.caption(f"• **Cerebras:** {'✅' if CEREBRAS_API_KEY else '❌'}")
+            st.caption(f"• **Cloudflare:** {'✅' if CLOUDFLARE_API_KEY and CLOUDFLARE_ACCOUNT_ID else '❌'}")
 
         search_kw = st.text_input("🔍", key="skw", label_visibility="collapsed", placeholder=t["search_hist_placeholder"])
         st.caption(t["chat_hist"])
@@ -351,8 +353,13 @@ else:
     else:
         prompt_preset = None
         if not st.session_state.messages:
-            st.title(f"{t['welcome']}{st.session_state.username} 👋")
-            st.caption(t['help_today'])
+            col_h1, col_h2 = st.columns([1, 8])
+            with col_h1:
+                if os.path.exists(LOGO_FILE): st.image(LOGO_FILE, width=70)
+            with col_h2:
+                st.title(f"{t['welcome']}{st.session_state.username} 👋")
+                st.caption(t['help_today'])
+
             cg1, cg2, cg3 = st.columns(3)
             with cg1:
                 st.markdown(f'<div class="suggestion-card"><b>{t["idea_title"]}</b><br><span>{t["idea_desc"]}</span></div>', unsafe_allow_html=True)
@@ -362,16 +369,44 @@ else:
                 if st.button(t["try_this"], key="p2", use_container_width=True): prompt_preset = "Viết script Python crawl dữ liệu đơn giản."
             with cg3:
                 st.markdown(f'<div class="suggestion-card"><b>{t["search_title"]}</b><br><span>{t["search_desc"]}</span></div>', unsafe_allow_html=True)
-                if st.button(t["try_this"], key="p3", use_container_width=True): prompt_preset = "Tin tức mới nhất về AI?"
+                if st.button(t["try_this"], key="p3", use_container_width=True): 
+                    prompt_preset = "Tạo ảnh một hòn đảo viễn tưởng lung linh ban đêm"
+                    model_choice = "🎨 NKN Image Creator"
         else:
             for m in st.session_state.messages:
-                with st.chat_message(m["role"]): st.markdown(m["content"])
+                avatar = BOT_AVATAR if m["role"] == "assistant" else None
+                with st.chat_message(m["role"], avatar=avatar):
+                    if m.get("type") == "image":
+                        st.image(m["content"], caption="Ảnh được tạo bởi NKN Image Creator")
+                    else:
+                        st.markdown(m["content"])
 
-        with st.expander(t["upload_title"], expanded=False):
-            uploaded_file = st.file_uploader(t["upload_label"], type=["png", "jpg", "jpeg", "webp", "pdf", "docx", "txt"])
+        # --- 📁 UPLOAD FILE & 🎙️ MICROPHONE ---
+        with st.expander("📎 Tải tệp & 🎙️ Ghi âm giọng nói (Micro)", expanded=False):
+            col_up1, col_up2 = st.columns(2)
+            with col_up1:
+                uploaded_file = st.file_uploader(t["upload_label"], type=["png", "jpg", "jpeg", "webp", "pdf", "docx", "txt"])
+            with col_up2:
+                audio_recorded = st.audio_input(t["mic_label"])
 
         prompt_input = st.chat_input(t["chat_placeholder"])
         prompt = prompt_input or prompt_preset
+
+        # Nếu người dùng thu âm qua Micro -> Chuyển audio thành prompt
+        if audio_recorded and not prompt:
+            if client_gemini:
+                with st.spinner("🎙️ Đang lắng nghe & chuyển đổi giọng nói..."):
+                    try:
+                        audio_bytes = audio_recorded.getvalue()
+                        res_audio = client_gemini.models.generate_content(
+                            model="gemini-3.6-flash",
+                            contents=[types.Part.from_bytes(data=audio_bytes, mime_type="audio/wav"), "Hãy chép lại chính xác nội dung câu nói trong file âm thanh này bằng văn bản."]
+                        )
+                        prompt = res_audio.text
+                    except Exception as e:
+                        st.error(f"Lỗi nhận diện giọng nói: {e}")
+            else:
+                st.warning("⚠️ Cần NKN Key để sử dụng tính năng giọng nói.")
 
         if prompt:
             f_type, f_data = process_uploaded_file(uploaded_file)
@@ -385,39 +420,50 @@ else:
                 if f_type == "image": st.image(f_data, width=300)
                 st.markdown(display_msg)
 
-            with st.chat_message("assistant"):
+            with st.chat_message("assistant", avatar=BOT_AVATAR):
                 s_context = ""
-                if enable_search:
+                if enable_search and "Image" not in model_choice:
                     with st.status(t['search_status']):
                         s_res = search_duckduckgo(prompt)
                         if s_res: s_context = f"\n\n[Search Data]:\n{s_res}"
 
                 final_prompt = prompt + file_context + s_context
                 response = ""
+                response_type = "text"
                 provider, model_id = MODEL_MAPPING.get(model_choice, ("openrouter", "deepseek/deepseek-chat"))
 
-                # 1. NKN INTELLIGENT (OPENROUTER - DEEPSEEK V3)
-                if provider == "openrouter":
-                    if not client_openrouter: response = "⚠️ Chưa cấu hình `OPENROUTER_API_KEY` cho NKN Intelligent."
+                # 1. NKN IMAGE CREATOR (TẠO ẢNH AI)
+                if provider == "image_gen":
+                    with st.spinner("🎨 NKN Image Creator đang vẽ bức ảnh cho bạn..."):
+                        img_url = f"https://image.pollinations.ai/prompt/{quote(prompt)}?width=1024&height=1024&nologo=true"
+                        response = img_url
+                        response_type = "image"
+                        st.image(img_url, caption=f"Hình ảnh: {prompt}")
+
+                # 2. NKN INTELLIGENT
+                elif provider == "openrouter":
+                    if not client_openrouter: response = "⚠️ Chưa cấu hình `OPENROUTER_API_KEY`."
                     else:
                         try:
                             msgs = [{"role": "system", "content": SYSTEM_PROMPT}]
-                            for m in st.session_state.messages[:-1]: msgs.append({"role": m["role"], "content": m["content"]})
+                            for m in st.session_state.messages[:-1]: 
+                                if m.get("type") != "image": msgs.append({"role": m["role"], "content": m["content"]})
                             msgs.append({"role": "user", "content": final_prompt})
 
                             res = client_openrouter.chat.completions.create(model=model_id, messages=msgs, stream=False)
                             response = res.choices[0].message.content
                         except Exception as e: response = f"❌ Lỗi NKN Intelligent API: {e}"
 
-                # 2. NKN VISION 3.6 (GEMINI)
+                # 3. NKN VISION
                 elif provider == "gemini":
                     if not client_gemini: response = "⚠️ Chưa có `ASTROX_API_KEY`."
                     else:
                         try:
                             contents = []
                             for m in st.session_state.messages[:-1]:
-                                role = "user" if m["role"] == "user" else "model"
-                                contents.append(types.Content(role=role, parts=[types.Part.from_text(text=m["content"])]))
+                                if m.get("type") != "image":
+                                    role = "user" if m["role"] == "user" else "model"
+                                    contents.append(types.Content(role=role, parts=[types.Part.from_text(text=m["content"])]))
                             
                             if f_type == "image":
                                 img_b = BytesIO(); f_data.save(img_b, format="PNG")
@@ -430,20 +476,21 @@ else:
                             response = res.text
                         except Exception as e: response = f"❌ Lỗi NKN Vision API: {e}"
 
-                # 3. NKN FAST SPEED (CEREBRAS)
+                # 4. NKN FAST SPEED
                 elif provider == "cerebras":
                     if not client_cerebras: response = "⚠️ Chưa cấu hình `CEREBRAS_API_KEY`."
                     else:
                         try:
                             msgs = [{"role": "system", "content": SYSTEM_PROMPT}]
-                            for m in st.session_state.messages[:-1]: msgs.append({"role": m["role"], "content": m["content"]})
+                            for m in st.session_state.messages[:-1]: 
+                                if m.get("type") != "image": msgs.append({"role": m["role"], "content": m["content"]})
                             msgs.append({"role": "user", "content": final_prompt})
 
                             res = client_cerebras.chat.completions.create(model=model_id, messages=msgs, stream=False)
                             response = res.choices[0].message.content
                         except Exception as e: response = f"❌ Lỗi NKN Fast Speed API: {e}"
 
-                # 4. NKN CLOUD (CLOUDFLARE WORKERS AI - MODEL MỚI)
+                # 5. NKN CLOUD
                 elif provider == "cloudflare":
                     if not CLOUDFLARE_API_KEY or not CLOUDFLARE_ACCOUNT_ID: response = "⚠️ Chưa cấu hình `CLOUDFLARE_API_KEY` hoặc `CLOUDFLARE_ACCOUNT_ID`."
                     else:
@@ -452,7 +499,8 @@ else:
                             headers = {"Authorization": f"Bearer {CLOUDFLARE_API_KEY}"}
                             
                             msgs = [{"role": "system", "content": SYSTEM_PROMPT}]
-                            for m in st.session_state.messages[:-1]: msgs.append({"role": m["role"], "content": m["content"]})
+                            for m in st.session_state.messages[:-1]: 
+                                if m.get("type") != "image": msgs.append({"role": m["role"], "content": m["content"]})
                             msgs.append({"role": "user", "content": final_prompt})
 
                             cf_res = requests.post(cf_url, headers=headers, json={"messages": msgs}, timeout=30)
@@ -464,9 +512,10 @@ else:
                                 response = f"❌ Lỗi NKN Cloud: {res_json.get('errors')}"
                         except Exception as e: response = f"❌ Lỗi NKN Cloud API: {e}"
 
-                st.markdown(response)
+                if response_type == "text":
+                    st.markdown(response)
 
-            st.session_state.messages.append({"role": "assistant", "content": response})
+            st.session_state.messages.append({"role": "assistant", "content": response, "type": response_type})
             all_c = load_db(CHATS_FILE)
             if st.session_state.username not in all_c: all_c[st.session_state.username] = {}
             c_title = all_c[st.session_state.username].get(st.session_state.current_chat_id, {}).get("title", prompt[:30])
